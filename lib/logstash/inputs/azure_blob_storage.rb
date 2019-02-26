@@ -104,7 +104,7 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
 
 public
 def register
-    @logger.info("=== azure_blob_storage "+@id[0,6]+" ===")
+    @logger.info(@id[0,6]+" === azure_blob_storage ===")
     # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
     # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
 
@@ -199,7 +199,7 @@ def run(queue)
         
         # Worklist is the subset of files where the already read offset is smaller than the file size
         worklist = filelist.select {|name,file| file[:offset] < file[:length]}
-        @logger.info("worklist contains #{worklist.size} blobs")
+        @logger.info(+@id[0,6]+" worklist contains #{worklist.size} blobs to process")
         # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
             res = resource(name)
@@ -209,13 +209,13 @@ def run(queue)
                 file[:length]=chunk.size
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
-                @logger.info("partial file #{res[:nsg]} [#{res[:date]}]")
+                @logger.debug(@id[0,6]+" partial file #{res[:nsg]} [#{res[:date]}]")
             end
             if logtype == "nsgflowlog" && @is_json_codec
                 begin
                     @processed += nsgflowlog(queue, JSON.parse(chunk))
                 rescue JSON::ParserError
-                    @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
+                    @logger.error(@id[0,6]+" parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
             # TODO Convert this to line based grokking.
 	    elsif logtype == "wadiis" && !@is_json_codec
@@ -224,7 +224,7 @@ def run(queue)
                 queue << chunk
                 @processed += 1
             end
-            @logger.info("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
+            @logger.debug(@id[0,6]+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
             @registry.store(name, { :offset => file[:length], :length => file[:length] })
             # if stop? good moment to stop what we're doing
             if stop?
@@ -294,7 +294,7 @@ def nsgflowlog(queue, json)
                   unless iplookup.nil?
                     ev.merge!(addip(tups[1], tups[2]))
                   end
-                  @logger.debug(ev.to_s)
+                  @logger.trace(ev.to_s)
                   event = LogStash::Event.new('message' => ev.to_json)
                   decorate(event)
                   queue << event
@@ -335,7 +335,7 @@ def list_blobs()
                 length = blob.properties[:content_length].to_i
                 off = @registry[blob.name]
                 unless off.nil?
-                    @logger.debug("seen #{blob.name} which is #{length} with offset #{offset}")
+                    @logger.debug(@id[0,6]+" seen #{blob.name} which is #{length} with offset #{offset}")
                     offset = off[:offset]
                 end
                 files.store(blob.name, { :offset => offset, :length => length })
@@ -344,7 +344,7 @@ def list_blobs()
         nextMarker = blobs.continuation_token
         break unless nextMarker && !nextMarker.empty?
     end
-    @logger.debug("list_blobs found #{files.size} blobs")
+    @logger.debug(@id[0,6]+" list_blobs found #{files.size} blobs")
     return files
 end
 
@@ -353,12 +353,12 @@ def save_registry(filelist)
      # TODO because of threading, processed values and regsaved are not thread safe, they can change as instance variable @!
      unless @processed == @regsaved
          @regsaved = @processed
-         @logger.info("saving #{filelist.size} blobs and offsets to registry #{registry_path}")
+         @logger.info(@id[0,6]+" processed #{@processed} events, saving #{filelist.size} blobs and offsets to registry #{registry_path}")
          Thread.new {
            begin
              @blob_client.create_block_blob(container, registry_path, Marshal.dump(filelist))
            rescue
-             @logger.error("Oh my, registry write failed")
+             @logger.error(@id[0,6]+" Oh my, registry write failed, do you have write access?")
            end
          }
       end
@@ -368,13 +368,13 @@ def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
-    @logger.info("probing #{blob.name} for header and tail")
+    @logger.info(@id[0,6]+" using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
-    @logger.info("learned header: #{@head}")
+    @logger.info(@id[0,6]+" learned header: #{@head}")
     length = blob.properties[:content_length].to_i
     offset = length - blocks.last.size
     @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
-    @logger.info("learned tail: #{@tail}")
+    @logger.info(@id[0,6]+" learned tail: #{@tail}")
 end
 
 def resource(str)
