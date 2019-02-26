@@ -28,9 +28,6 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
   # The storage account name for the azure storage account.
   config :storageaccount, :validate => :string
 
-  # SAS is the Shared Access Signature, that provides restricted access rights. If the sas_token is absent, the access_key is used instead.
-  config :sas_token, :validate => :password
-
   # The (primary or secondary) Access Key for the the storage account. The key can be found in the portal.azure.com or through the azure api StorageAccounts/ListKeys. For example the PowerShell command Get-AzStorageAccountKey.
   config :access_key, :validate => :password
 
@@ -60,6 +57,9 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
   # D7fe0d4f275a84c32982795b0e5c7d3a1 2312  json objects for 2nd minute
   # Z00000000000000000000000000000000 2     ]}
   config :interval, :validate => :number, :default => 60
+
+  # WAD IIS Grok Pattern
+  #config :grokpattern, :validate => :string, :required => false, :default => '%{TIMESTAMP_ISO8601:log_timestamp} %{NOTSPACE:instanceId} %{NOTSPACE:instanceId2} %{IPORHOST:ServerIP} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:httpVersion} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}'
 
   # The string that starts the JSON. Only needed when the codec is JSON. When partial file are read, the result will not be valid JSON unless the start and end are put back. the file_head and file_tail are learned at startup, by reading the first file in the blob_list and taking the first and last block, this would work for blobs that are appended like nsgflowlogs. The configuration can be set to override the learning. In case learning fails and the option is not set, the default is to use the 'records' as set by nsgflowlogs.
   config :file_head, :validate => :string, :required => false, :default => '{"records":['
@@ -113,25 +113,26 @@ def register
     @regsaved = @processed
 
     # Try in this order to access the storageaccount
-    # 1. onnection_string
-    # 2. storageaccount / sas_token
+    # 1. storageaccount / sas_token
+    # 2. connection_string
     # 3. storageaccount / access_key
-    unless connection_string.nil?
-        @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(connection_string)
-    else
-    	unless sas_token.nil?
-            @blob_client = Azure::Storage::Blob::BlobService.create(
-              storage_account_name: storageaccount,
-	      storage_sas_token: storage_sas_token.value,
-              user_agent_prefix: configname
-            )
+
+    conn = connection_string
+    unless sas_token.nil?
+        # TODO: Fix SAS Tokens
+        unless sas_token.value.start_with?('?')
+		conn = "BlobEndpoint=https://#{storageaccount}.blob.core.windows.net;SharedAccessSignature=#{sas_token.value}"
         else
-            @blob_client = Azure::Storage::Blob::BlobService.create(
-                storage_account_name: storageaccount,
-                storage_access_key: access_key.value,
-                user_agent_prefix: config_name
-            )
-        end
+		conn = sas_token.value
+    	end
+    end
+    unless conn.nil?
+        @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(conn)
+    else
+        @blob_client = Azure::Storage::Blob::BlobService.create(
+            storage_account_name: storageaccount,
+            storage_access_key: access_key.value,
+        )
     end
 
     # redis is optional to cache ip's from the optional iplookup
@@ -216,7 +217,8 @@ def run(queue)
                 rescue JSON::ParserError
                     @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
-            elsif logtype == "wadiis" && !@is_json_codec
+            # TODO Convert this to line based grokking.
+	    elsif logtype == "wadiis" && !@is_json_codec
                 @processed += wadiislog(queue, file[:name])
             else
                 queue << chunk
@@ -286,7 +288,7 @@ def nsgflowlog(queue, json)
               flowx["flowTuples"].each do |tup|
                   tups = tup.split(',')
                   ev = rule.merge({:unixtimestamp => tups[0], :src_ip => tups[1], :dst_ip => tups[2], :src_port => tups[3], :dst_port => tups[4], :protocol => tups[5], :direction => tups[6], :decision => tups[7]})
-                  if (record["version"]==2)
+                  if (record["properties"]["Version"]==2)
                       ev.merge!( {:flowstate => tups[8], :src_pack => tups[9], :src_bytes => tups[10], :dst_pack => tups[11], :dst_bytes => tups[12]} )
                   end
                   unless iplookup.nil?
@@ -308,11 +310,8 @@ def wadiislog(lines)
       count=0
       lines.each do |line|
           unless line.start_with?('#')
-#                   grok {
-#                       match => ['message', '%{TIMESTAMP_ISO8601:log_timestamp} %{NOTSPACE:instanceId} %{NOTSPACE:instanceId2} %{IPORHOST:ServerIP} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:httpVersion} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}']
-                  ev = {:log_timestamp => '2019-01-01 00:00Z', :instanceid=>'butz'}
-                  queue << LogStash::Event.new('message' => ev.to_json)
-                  count+=1
+              queue << LogStash::Event.new('message' => ev.to_json)
+              count+=1
           end
       end
       return count
