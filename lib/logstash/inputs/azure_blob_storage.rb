@@ -221,7 +221,10 @@ def run(queue)
 	    elsif logtype == "wadiis" && !@is_json_codec
                 @processed += wadiislog(queue, file[:name])
             else
-                queue << chunk
+                @codec.decode(chunk) do |event|
+                    decorate(event)
+                    queue << event
+                end
                 @processed += 1
             end
             @logger.debug(@id[0,6]+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
