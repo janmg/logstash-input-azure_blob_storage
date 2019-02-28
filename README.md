@@ -10,7 +10,7 @@ All plugin documentation are placed under one [central location](http://www.elas
 
 ## Need Help?
 
-Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum. For real problems or feature requests, raise a github issue. Pull requests will ionly be merged after discussion through an issue.
+Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum. For real problems or feature requests, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will ionly be merged after discussion through an issue.
 
 ## Purpose
 This plugin can read from Azure Storage Blobs, for instance diagnostics logs for NSG flow logs or accesslogs from App Services. 
@@ -52,6 +52,9 @@ curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/j
 
 
 ## Configuration Examples
+The minimum configuration required as input is storageaccount, access_key and container.
+
+For nsgflowlogs, a simple configuration looks like this
 ```
 input {
     azure_blob_storage {
@@ -82,7 +85,7 @@ output {
 }
 ```
 
-You can include additional options to tweak the operations
+It's possible to specify the optional parameters to overwrite the defaults. The iplookup, use_redis and iplist parameters are used for additional information about the source and destination ip address. Redis can be used for caching the results and iplist is to configure an array of ip addresses.
 ```
 input {
     azure_blob_storage {
@@ -93,7 +96,7 @@ input {
         logtype => "nsgflowlog"
         prefix => "resourceId=/"
         registry_create_policy => "resume"
-        interval => 60
+        interval => 300
         iplookup => "http://10.0.0.5:6081/ripe.php?ip="
         use_redis => true
         iplist => [
@@ -103,3 +106,47 @@ input {
     }
 }
 ```
+
+For WAD IIS and App Services the HTTP AccessLogs can be retrieved from a storage account as line based events and parsed through GROK. The date stamp can also be parsed with %{TIMESTAMP_ISO8601:log_timestamp}. For WAD IIS logfiles the container is wad-iis-logfiles. In the future grokking may happen already by the plugin.
+```
+input {
+    azure_blob_storage {
+        storageaccount => "yourstorageaccountname"
+        access_key => "Ba5e64c0d3=="
+        container => "access-logs"
+        interval => 300
+        codec => line
+    }
+}
+
+filter {
+  if [message] =~ "^#" {
+    drop {}
+  }
+
+  mutate {
+    strip => "message"
+  }
+
+  grok {
+    match => ['message', '(?<timestamp>%{YEAR}-%{MONTHNUM}-%{MONTHDAY} %{HOUR}:%{MINUTE}:%{SECOND}\d+) %{NOTSPACE:instanceId} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}']
+  }
+
+  date {
+    match => [ "timestamp", "YYYY-MM-dd HH:mm:ss" ]
+    target => "@timestamp"
+  }
+
+  mutate {
+    remove_field => ["log_timestamp"]
+    remove_field => ["message"]
+    remove_field => ["win32response"]
+    remove_field => ["subresponse"]
+    remove_field => ["username"]
+    remove_field => ["clientPort"]
+    remove_field => ["port"]
+    remove_field => ["timestamp"]
+  }
+}
+```
+
