@@ -10,7 +10,7 @@ require 'azure/storage/blob'
 #require "redis"
 #require 'net/http'
 
-# This is a logstash input plugin for files in Azure Blob Storage. There is a storage explorer in the portal and an application with the same name https://storageexplorer.com. A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files) and blobs are constructed of or more blocks. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
+# This is a logstash input plugin for files in Azure Blob Storage. There is a storage explorer in the portal and an application with the same name https://storageexplorer.com. A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files). Blobs have one or more blocks. After writing the blocks, they can be committed. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
 # https://azure.microsoft.com/en-us/services/storage/blobs/
 class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
   config_name "azure_blob_storage"
@@ -23,16 +23,19 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
 
   # The storage account is accessed through Azure::Storage::Blob::BlobService, it needs either a sas_token, connection string or a storageaccount/access_key pair.
   # https://github.com/Azure/azure-storage-ruby/blob/master/blob/lib/azure/storage/blob/blob_service.rb#L42
-  config :connection_string, :validate => :password
+  config :connection_string, :validate => :password, :required => false
 
   # The storage account name for the azure storage account.
-  config :storageaccount, :validate => :string
+  config :storageaccount, :validate => :string, :required => false
+
+  # DNS Suffix other then blob.core.windows.net
+  config :dns_suffix, :validate => :string, :required => false, :default => 'blob.core.windows.net'
 
   # The (primary or secondary) Access Key for the the storage account. The key can be found in the portal.azure.com or through the azure api StorageAccounts/ListKeys. For example the PowerShell command Get-AzStorageAccountKey.
-  config :access_key, :validate => :password
+  config :access_key, :validate => :password, :required => false
 
   # SAS is the Shared Access Signature, that provides restricted access rights. If the sas_token is absent, the access_key is used instead.
-  config :sas_token, :validate => :password
+  config :sas_token, :validate => :password, :required => false
 
   # The container of the blobs.
   config :container, :validate => :string, :default => 'insights-logs-networksecuritygroupflowevent'
@@ -118,11 +121,13 @@ def register
     # 2. connection_string
     # 3. storageaccount / access_key
 
-    conn = connection_string
+    unless connection_string.nil?
+	conn = connection_string.value
+    end
     unless sas_token.nil?
         # TODO: Fix SAS Tokens
         unless sas_token.value.start_with?('?')
-		conn = "BlobEndpoint=https://#{storageaccount}.blob.core.windows.net;SharedAccessSignature=#{sas_token.value}"
+		conn = "BlobEndpoint=https://#{storageaccount}.#{dns_suffix};SharedAccessSignature=#{sas_token.value}"
         else
 		conn = sas_token.value
     	end
@@ -255,6 +260,8 @@ def stop
 end
 
 
+
+private
 def full_read(filename)
     return @blob_client.get_blob(container, filename)[1]
 end
@@ -371,6 +378,7 @@ end
 def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
+    return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
     @logger.info(@pipe_id+" using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
