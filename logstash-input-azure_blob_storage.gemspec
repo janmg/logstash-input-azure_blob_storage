@@ -6,14 +6,14 @@ Gem::Specification.new do |s|
   s.description   = <<-EOF
  This gem is a Logstash plugin. It reads and parses data from Azure Storage Blobs. The azure_blob_storage is a reimplementation to replace azureblob from azure-diagnostics-tools/Logstash. It can deal with larger volumes and partial file reads and eliminating a delay when rebuilding the registry.
 
- The logstash pipeline configuration would look like this
-  input {
-    azure_blob_storage {
-        storageaccount => "yourstorageaccountname"
-        access_key => "Ba5e64c0d3=="
-        container => "insights-logs-networksecuritygroupflowevent"
-    }
-  }
+ The minimal logstash pipeline configuration would look like this
+> input {
+>   azure_blob_storage {
+>       storageaccount => "yourstorageaccountname"
+>       access_key => "Ba5e64c0d3=="
+>       container => "insights-logs-networksecuritygroupflowevent"
+>   }
+> }
 EOF
   s.homepage      = 'https://github.com/janmg/logstash-input-azure_blob_storage'
   s.authors       = ['Jan Geertsma']
