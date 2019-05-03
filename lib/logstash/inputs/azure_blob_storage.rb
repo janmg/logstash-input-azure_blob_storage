@@ -2,13 +2,7 @@
 require "logstash/inputs/base"
 require "stud/interval"
 require 'azure/storage/blob'
-#require 'securerandom'
-#require 'rbconfig'
-#require 'date'
-#require 'json'
-#require 'thread'
-#require 'redis'
-#require 'net/http'
+require 'json'
 
 # This is a logstash input plugin for files in Azure Blob Storage. There is a storage explorer in the portal and an application with the same name https://storageexplorer.com. A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files). Blobs have one or more blocks. After writing the blocks, they can be committed. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
 # https://azure.microsoft.com/en-us/services/storage/blobs/
@@ -82,33 +76,13 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
   # For NSGFLOWLOGS a path starts with "resourceId=/", but this would only be needed to exclude other files that may be written in the same container.
   config :prefix, :validate => :string, :required => false
 
-  # Set the value for the registry file.
-  #
-  # The default, `data/registry`, it contains a Ruby Marshal Serialized Hash of the filename the offset read sofar and the filelength the list time a filelisting was done.
-  config :registry_path, :validate => :string, :required => false, :default => 'data/registry'
-
-  # The default, `resume`, will load the registry offsets and will start processing files from the offsets.
-  # When set to `start_over`, all log files are processed from begining.
-  # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
-  config :registry_create_policy, :validate => ['resume','start_over','start_fresh'], :required => false, :default => 'resume'
-
-  # Optional to enrich NSGFLOWLOGS with netname and subnet the iplookup value points to a webservice that provides the information in JSON format like this.
-  # {"ip":"8.8.8.8","netname":"Google","subnet":"8.8.8.0\/24","hostname":"google-public-dns-a.google.com"}
-  # In the query parameter has the <ip> tag will be replaced by the IP address to lookup, other parameters are optional and according to your lookup service. 
-  config :iplookup, :validate => :string, :required => false, :default => 'http://127.0.0.1/ripe.php?ip=<ip>&TOKEN=token'
-
-  # Optional array of JSON objects that don't require a lookup
-  config :iplist, :validate => :array, :required => false, :default => ['{"ip":"10.0.0.4","netname":"Application Gateway","subnet":"10.0.0.0\/24","hostname":"appgw"}']
-
-  # Optional Redis IP cache
-  config :use_redis, :validate => :boolean, :required => false, :default => false
-
 
 
 public
 def register
     @pipe_id = Thread.current[:name].split("[").last.split("]").first
-    @logger.info("=== "+config_name+"/"+@pipe_id+"/"+@id[0,6]+" ===")
+    @logger.info("=== "+config_name+" / "+@pipe_id+" / "+@id[0,6]+" ===")
+    #@logger.info("ruby #{ RUBY_VERSION }p#{ RUBY_PATCHLEVEL } / #{Gem.loaded_specs[config_name].version.to_s}")
     @logger.info("Contact me at jan@janmg.com, if something in this plugin doesn't work")
     # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
     # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
@@ -127,9 +101,9 @@ def register
     end
     unless sas_token.nil?
         unless sas_token.value.start_with?('?')
-		conn = "BlobEndpoint=https://#{storageaccount}.#{dns_suffix};SharedAccessSignature=#{sas_token.value}"
+	    conn = "BlobEndpoint=https://#{storageaccount}.#{dns_suffix};SharedAccessSignature=#{sas_token.value}"
         else
-		conn = sas_token.value
+	    conn = sas_token.value
     	end
     end
     unless conn.nil?
@@ -220,7 +194,8 @@ def run(queue)
             end
             if logtype == "nsgflowlog" && @is_json
                 begin
-                    @processed += nsgflowlog(queue, JSON.parse(chunk))
+		    fingjson = JSON.parse(chunk)
+                    @processed += nsgflowlog(queue, fingjson)
                 rescue JSON::ParserError
                     @logger.error(@pipe_id+" parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
@@ -303,9 +278,11 @@ def nsgflowlog(queue, json)
                   if (record["properties"]["Version"]==2)
                       ev.merge!( {:flowstate => tups[8], :src_pack => tups[9], :src_bytes => tups[10], :dst_pack => tups[11], :dst_bytes => tups[12]} )
                   end
-                  unless iplookup.nil?
-                    ev.merge!(addip(tups[1], tups[2]))
-                  end
+                  # Replaced by new plugin: logstash-filter-lookup
+		  # This caused JSON parse errors since iplookup is now obsolete
+		  #unless iplookup.nil?
+                  #  ev.merge!(addip(tups[1], tups[2]))
+                  #end
                   @logger.trace(ev.to_s)
                   event = LogStash::Event.new('message' => ev.to_json)
                   decorate(event)
