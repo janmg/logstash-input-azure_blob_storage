@@ -116,23 +116,6 @@ def register
         )
     end
 
-    # redis is optional to cache ip's from the optional iplookup
-    # iplookups are optional and so is the dependancy for caching through redis 
-    if use_redis && !iplookup.nil?
-      begin
-        require 'redis'
-      rescue LoadError
-        require 'rubygems/dependency_installer'
-        installer = Gem::DependencyInstaller.new
-        installer.install 'redis'
-        Gem.refresh
-        Gem::Specification.find_by_name('redis').activate
-        require 'redis'
-      ensure
-        @red = Redis.new
-      end
-    end
-
     @registry = Hash.new
     unless registry_create_policy == "start_over"
       begin
@@ -378,34 +361,6 @@ end
 
 def val(str)
     return str.split('=')[1]
-end
-
-
-
-# Optional lookup for netname and hostname for the srcip and dstip returned in a Hash
-# TODO: split out to own class
-def addip(srcip, dstip)
-    #TODO: return anonymous merge
-    srcjson = JSON.parse(lookup(srcip))
-    dstjson = JSON.parse(lookup(dstip))
-    return {:srcnet=>srcjson["netname"],:srchost=>srcjson["hostname"],:dstnet=>dstjson["netname"],:dsthost=>dstjson["hostname"]}
-end
-
-def lookup(ip)
-    # TODO if ip in iplist return config
-    unless @red.nil?
-        res = @red.get(ip)
-    end
-    uri = URI.parse(iplookup.sub('<ip>',ip))
-    res = Net::HTTP.get(uri)
-    if res.nil?
-        res = Net::HTTP.get(uri)
-	unless @red.nil?
-            @red.set(ip, res)
-            @red.expire(ip,604800)
-        end
-    end
-    return res 
 end
 
 end # class LogStash::Inputs::AzureBlobStorage
