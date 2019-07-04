@@ -83,7 +83,7 @@ def register
     @pipe_id = Thread.current[:name].split("[").last.split("]").first
     @logger.info("=== "+config_name+" / "+@pipe_id+" / "+@id[0,6]+" ===")
     #@logger.info("ruby #{ RUBY_VERSION }p#{ RUBY_PATCHLEVEL } / #{Gem.loaded_specs[config_name].version.to_s}")
-    @logger.info("Contact me at jan@janmg.com, if something in this plugin doesn't work")
+    @logger.info("If this plugin doesn't work, please raise an issue in https://github.com/janmg/logstash-input-azure_blob_storage")
     # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
     # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
 
@@ -132,7 +132,11 @@ def register
         end
     end
 
-    @is_json = (defined?(LogStash::Codecs::JSON) == 'constant') && (@codec.is_a? LogStash::Codecs::JSON)
+    @is_json = false 
+    if @codec.class == LogStash::Codecs::JSON 
+       @is_json = true 
+    end
+    @logger.debug(@pipe_id+" is_json is set to: #{@is_json} because it is a #{@codec}")
     @head = ''
     @tail = ''
     # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
@@ -145,6 +149,7 @@ def register
            @tail = file_tail
         end
     end
+    @logger.info(@pipe_id+" head will be: #{@head} and tail is set to #{@tail}")
 end # def register
 
 def run(queue)
