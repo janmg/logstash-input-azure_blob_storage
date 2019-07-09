@@ -9,7 +9,7 @@ require 'json'
 class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
   config_name "azure_blob_storage"
 
-  # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog has to be JSON and the for WADIIS and APPSERVICE it has to be plain.
+  # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json"  and the for WADIIS and APPSERVICE is "line".
   default :codec, "json"
 
   # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue. 
@@ -132,9 +132,14 @@ def register
         end
     end
 
-    @is_json = false 
-    if @codec.class == LogStash::Codecs::JSON 
-       @is_json = true 
+    @is_json = false
+    begin
+      if @codec.is_a?(LogStash::Codecs::JSON)
+        @is_json = true 
+      end
+    rescue
+        @logger.debug(@pipe_id+" Rescue from uninitialized constant ...")
+	# how can you elegantly check the codec type in logstash? anyway, not worth crashing over since is_json is already set to false by default
     end
     @logger.debug(@pipe_id+" is_json is set to: #{@is_json} because it is a #{@codec}")
     @head = ''
@@ -178,7 +183,9 @@ def run(queue)
                 file[:length]=chunk.size
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
-                @logger.debug(@pipe_id+" partial file #{res[:nsg]} [#{res[:date]}]")
+                # This only applies to NSG!
+		@logger.info(@pipe_id+" partial file #{res[:nsg]} [#{res[:date]}]")
+		 @logger.info(@pipe_id+" partial file #{name}")
             end
             if logtype == "nsgflowlog" && @is_json
                 begin
@@ -197,6 +204,7 @@ def run(queue)
                 end
                 @processed += 1
             end
+	    # This only applies to NSG!
             @logger.debug(@pipe_id+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
             @registry.store(name, { :offset => file[:length], :length => file[:length] })
             # if stop? good moment to stop what we're doing

@@ -1,3 +1,6 @@
+## 0.10.5
+  - Previous fix broke codec = "line"
+
 ## 0.10.4
   - Fixed JSON parsing error for partial files because somehow (logstash 7?) @codec.is_a? doesn't work anymore
 
