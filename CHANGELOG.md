@@ -1,3 +1,6 @@
+## 0.10.6
+  - Fixed the rootcause of the checking the codec. Now compare the classname.
+
 ## 0.10.5
   - Previous fix broke codec = "line"
 

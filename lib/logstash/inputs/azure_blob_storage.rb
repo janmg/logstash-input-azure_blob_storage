@@ -91,6 +91,8 @@ def register
     @processed = 0
     @regsaved = @processed
 
+    @buffer = FileWatch::BufferedTokenizer.new('\n')
+
     # Try in this order to access the storageaccount
     # 1. storageaccount / sas_token
     # 2. connection_string
@@ -134,14 +136,10 @@ def register
 
     @is_json = false
     begin
-      if @codec.is_a?(LogStash::Codecs::JSON)
+      if @codec.class.name.eql?("LogStash::Codecs::JSON")
         @is_json = true 
       end
-    rescue
-        @logger.debug(@pipe_id+" Rescue from uninitialized constant ...")
-	# how can you elegantly check the codec type in logstash? anyway, not worth crashing over since is_json is already set to false by default
     end
-    @logger.debug(@pipe_id+" is_json is set to: #{@is_json} because it is a #{@codec}")
     @head = ''
     @tail = ''
     # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
@@ -153,15 +151,17 @@ def register
         if file_tail
            @tail = file_tail
         end
+        @logger.info(@pipe_id+" head will be: #{@head} and tail is set to #{@tail}")
     end
-    @logger.info(@pipe_id+" head will be: #{@head} and tail is set to #{@tail}")
 end # def register
+
+
 
 def run(queue)
     filelist = Hash.new
 
-      # we can abort the loop if stop? becomes true
-      while !stop?
+    # we can abort the loop if stop? becomes true
+    while !stop?
         chrono = Time.now.to_i
         # load te registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
         # TODO: sort by timestamp
@@ -183,14 +183,13 @@ def run(queue)
                 file[:length]=chunk.size
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
-                # This only applies to NSG!
-		@logger.info(@pipe_id+" partial file #{res[:nsg]} [#{res[:date]}]")
-		 @logger.info(@pipe_id+" partial file #{name}")
+                @logger.debug(@pipe_id+" partial file #{name} from #{file[:offset]} to #{file[:length]}")
             end
             if logtype == "nsgflowlog" && @is_json
                 begin
 		    fingjson = JSON.parse(chunk)
                     @processed += nsgflowlog(queue, fingjson)
+                    @logger.debug(@pipe_id+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
                 rescue JSON::ParserError
                     @logger.error(@pipe_id+" parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
@@ -198,24 +197,24 @@ def run(queue)
 	    elsif logtype == "wadiis" && !@is_json
                 @processed += wadiislog(queue, file[:name])
             else
+                counter = 0
                 @codec.decode(chunk) do |event|
+                    counter += 1
                     decorate(event)
                     queue << event
                 end
-                @processed += 1
+                @processed += counter
             end
-	    # This only applies to NSG!
-            @logger.debug(@pipe_id+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
             @registry.store(name, { :offset => file[:length], :length => file[:length] })
             # if stop? good moment to stop what we're doing
             if stop?
                 return
             end
-            # save the registry regularly
+            # save the registry past the regular intervals
             now = Time.now.to_i
             if ((now - chrono) > interval)
                 save_registry(@registry)
-                chrono = now
+		chrono =+ interval
             end
         end
         # Save the registry and sleep until the remaining polling interval is over
@@ -223,9 +222,7 @@ def run(queue)
         sleeptime = interval - (Time.now.to_i - chrono)
         Stud.stoppable_sleep(sleeptime) { stop? }
     end
-
-    #  event = LogStash::Event.new("message" => @message, "host" => @host)
-  end # def run
+end
 
 def stop
     save_registry(@registry)
@@ -274,11 +271,6 @@ def nsgflowlog(queue, json)
                   if (record["properties"]["Version"]==2)
                       ev.merge!( {:flowstate => tups[8], :src_pack => tups[9], :src_bytes => tups[10], :dst_pack => tups[11], :dst_bytes => tups[12]} )
                   end
-                  # Replaced by new plugin: logstash-filter-lookup
-		  # This caused JSON parse errors since iplookup is now obsolete
-		  #unless iplookup.nil?
-                  #  ev.merge!(addip(tups[1], tups[2]))
-                  #end
                   @logger.trace(ev.to_s)
                   event = LogStash::Event.new('message' => ev.to_json)
                   decorate(event)
@@ -354,13 +346,13 @@ def learn_encapsulation
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
     return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
-    @logger.info(@pipe_id+" using #{blob.name} to learn the json header and tail")
+    @logger.debug(@pipe_id+" using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
-    @logger.info(@pipe_id+" learned header: #{@head}")
+    @logger.debug(@pipe_id+" learned header: #{@head}")
     length = blob.properties[:content_length].to_i
     offset = length - blocks.last.size
     @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
-    @logger.info(@pipe_id+" learned tail: #{@tail}")
+    @logger.debug(@pipe_id+" learned tail: #{@tail}")
 end
 
 def resource(str)

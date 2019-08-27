@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name          = 'logstash-input-azure_blob_storage'
-  s.version       = '0.10.5'
+  s.version       = '0.10.6'
   s.licenses      = ['Apache-2.0']
   s.summary       = 'This logstash plugin reads and parses data from Azure Storage Blobs.'
   s.description   = <<-EOF
@@ -21,7 +21,6 @@ EOF
 
   # Gem dependencies
   s.add_runtime_dependency "logstash-core-plugin-api", "~> 2.0"
-  s.add_runtime_dependency 'logstash-codec-plain', '~> 3.0'
   s.add_runtime_dependency 'stud', '~> 0.0.22'
   s.add_runtime_dependency 'azure-storage-blob', '~> 1.0'
   s.add_development_dependency 'logstash-devutils', '~> 1.0', '>= 1.0.0'
