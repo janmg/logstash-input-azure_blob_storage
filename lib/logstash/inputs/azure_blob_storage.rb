@@ -214,7 +214,7 @@ def run(queue)
             now = Time.now.to_i
             if ((now - chrono) > interval)
                 save_registry(@registry)
-		chrono =+ interval
+		chrono += interval
             end
         end
         # Save the registry and sleep until the remaining polling interval is over
@@ -343,6 +343,8 @@ end
 
 def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
+    # If the blobstorage can't be found, an error from farraday middleware will come with the text
+    # org.jruby.ext.set.RubySet cannot be cast to class org.jruby.RubyFixnum
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
     return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
