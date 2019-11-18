@@ -1,3 +1,8 @@
+## 0.11.0
+  - Implemented start_fresh to skip all previous logs and start monitoring new entries
+  - Fixed the timer, now properly sleep the interval and check again
+  - Work around for a Faraday Middleware v.s. Azure Storage Account bug in follow_redirect
+
 ## 0.10.6
   - Fixed the rootcause of the checking the codec. Now compare the classname.
 
