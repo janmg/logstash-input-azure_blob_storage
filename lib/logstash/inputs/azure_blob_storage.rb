@@ -118,22 +118,22 @@ def register
 
     @registry = Hash.new
     if registry_create_policy == "resume"
-      begin
-        @logger.info(@pipe_id+" resuming from registry")
-        @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
-        #[0] headers [1] responsebody
-      rescue
-        @registry.clear
-        @logger.error(@pipe_id+" loading registry failed, starting over")
+     @logger.info(@pipe_id+" resuming from registry")
+     for counter in 0..3
+       begin
+          @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+          #[0] headers [1] responsebody
+        rescue Exception => e
+          @logger.error(@pipe_id+" caught: #{e.message}")
+          @registry.clear
+          @logger.error(@pipe_id+" loading registry failed, starting over")
+        end
       end
     end
     # read filelist and set offsets to file length to mark all the old files as done
     if registry_create_policy == "start_fresh"
         @logger.info(@pipe_id+" starting fresh")
         @registry = list_blobs(true)
-        #tempreg.each do |name, file|
-        #   @registry.store(name, { :offset => file[:length], :length => file[:length] })
-        #end
     end
 
     @is_json = false
@@ -166,8 +166,8 @@ def run(queue)
     # we can abort the loop if stop? becomes true
     while !stop?
         chrono = Time.now.to_i
-        # load te registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
-        # TODO: sort by timestamp
+        # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
+        # TODO: sort by timestamp ?
         #filelist.sort_by(|k,v|resource(k)[:date])
 	worklist.clear
 	filelist.clear
@@ -190,7 +190,7 @@ def run(queue)
         # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
             #res = resource(name)
-            @logger.info(@pipe_id+" processing #{name} from #{file[:offset]} to #{file[:length]}")
+            @logger.debug(@pipe_id+" processing #{name} from #{file[:offset]} to #{file[:length]}")
             size = 0
             if file[:offset] == 0
                 chunk = full_read(name)
@@ -222,6 +222,8 @@ def run(queue)
                 @processed += counter
             end
             @registry.store(name, { :offset => size, :length => file[:length] })
+            # TODO add input plugin option to prevent connection cache
+            @blob_client.client.reset_agents!
 	    #@logger.info(@pipe_id+" name #{name} size #{size} len #{file[:length]}")
             # if stop? good moment to stop what we're doing
             if stop?
@@ -244,7 +246,9 @@ end
 def stop
     save_registry(@registry)
 end
-
+def close
+    save_registry(@registry)
+end
 
 
 private

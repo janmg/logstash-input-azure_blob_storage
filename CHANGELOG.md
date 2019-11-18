@@ -1,3 +1,8 @@
+## 0.11.1
+  - copied changes from irnc fork (danke!)
+  - Fixed trying to load the registry, three time is the charm
+  - logs are less chatty, changed info to debug
+
 ## 0.11.0
   - Implemented start_fresh to skip all previous logs and start monitoring new entries
   - Fixed the timer, now properly sleep the interval and check again
