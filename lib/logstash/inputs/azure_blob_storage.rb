@@ -76,6 +76,12 @@ config :file_tail, :validate => :string, :required => false, :default => ']}'
 # For NSGFLOWLOGS a path starts with "resourceId=/", but this would only be needed to exclude other files that may be written in the same container.
 config :prefix, :validate => :string, :required => false
 
+config :path_filters, :validate => :array, :default => ['**/*'], :required => false
+
+# TODO: Other feature requests
+# show file path in logger
+# add filepath as part of log message
+# option to keep registry on local disk
 
 
 public
@@ -119,14 +125,14 @@ def register
     @registry = Hash.new
     if registry_create_policy == "resume"
      @logger.info(@pipe_id+" resuming from registry")
-     for counter in 0..3
+     for counter in 1..3
        begin
           @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
           #[0] headers [1] responsebody
         rescue Exception => e
           @logger.error(@pipe_id+" caught: #{e.message}")
           @registry.clear
-          @logger.error(@pipe_id+" loading registry failed, starting over")
+          @logger.error(@pipe_id+" loading registry failed for attempt #{counter} of 3")
         end
       end
     end
@@ -182,6 +188,7 @@ def run(queue)
                 off = 0
             end
             newreg.store(name, { :offset => off, :length => file[:length] })
+            @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}")
 	end
         
         # Worklist is the subset of files where the already read offset is smaller than the file size
@@ -190,14 +197,14 @@ def run(queue)
         # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
             #res = resource(name)
-            @logger.debug(@pipe_id+" processing #{name} from #{file[:offset]} to #{file[:length]}")
+            @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}")
             size = 0
             if file[:offset] == 0
                 chunk = full_read(name)
                 size=chunk.size
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
-                @logger.debug(@pipe_id+" partial file #{name} from #{file[:offset]} to #{file[:length]}")
+                @logger.info(@pipe_id+" partial file #{name} from #{file[:offset]} to #{file[:length]}")
             end
             if logtype == "nsgflowlog" && @is_json
                 res = resource(name)
@@ -325,28 +332,28 @@ end
 def list_blobs(fill)
     files = Hash.new
     nextMarker = nil
-    counter = 0
-    loop do
+    for counter in 1..3
       begin
-         if (counter > 10)
-             @logger.error(@pipe_id+" lets try again for the 10th time, why don't faraday and azure storage accounts not play nice together? it has something to do with follow_redirect and a missing authorization header?")
-         end
          blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
          blobs.each do |blob|
-             # exclude the registry itself
-             unless blob.name == registry_path
+# FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
+# FNM_EXTGLOB allows you to use "test{a,b,c}" to match either "testa", "testb" or "testc" (closer to shell behavior)
+           unless blob.name == registry_path
+	     if @path_filters.any? {|path| File.fnmatch?(path, blob.name, File::FNM_PATHNAME | File::FNM_EXTGLOB)}
                  length = blob.properties[:content_length].to_i
-		 offset = 0
+                 offset = 0
                  if fill
                      offset = length
-		 end
+                 end
                  files.store(blob.name, { :offset => offset, :length => length })
+		 @logger.info("1: list_blobs #{blob.name} #{offset} #{length}")
              end
+           end
          end
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
       rescue Exception => e
-        @logger.error(@pipe_id+" caught: #{e.message}")
+        @logger.error(@pipe_id+" caught: #{e.message} for attempt #{counter} of 3")
 	counter += 1
       end
     end
