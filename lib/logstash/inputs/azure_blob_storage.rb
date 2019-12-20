@@ -55,6 +55,9 @@ config :registry_create_policy, :validate => ['resume','start_over','start_fresh
 # Z00000000000000000000000000000000 2     ]}
 config :interval, :validate => :number, :default => 60
 
+# debug_until will for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. This is a lightweight alternative to switching the loglevel from info to debug or even trace 
+config :debug_until, :validate => :number, :default => 0, :required => false
+
 # WAD IIS Grok Pattern
 #config :grokpattern, :validate => :string, :required => false, :default => '%{TIMESTAMP_ISO8601:log_timestamp} %{NOTSPACE:instanceId} %{NOTSPACE:instanceId2} %{IPORHOST:ServerIP} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:httpVersion} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}'
 
@@ -188,7 +191,7 @@ def run(queue)
                 off = 0
             end
             newreg.store(name, { :offset => off, :length => file[:length] })
-            @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}")
+	    if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
 	end
         
         # Worklist is the subset of files where the already read offset is smaller than the file size
@@ -197,7 +200,7 @@ def run(queue)
         # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
             #res = resource(name)
-            @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}")
+            if (@debug_until > @processed) then @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}") end
             size = 0
             if file[:offset] == 0
                 chunk = full_read(name)
@@ -346,7 +349,7 @@ def list_blobs(fill)
                      offset = length
                  end
                  files.store(blob.name, { :offset => offset, :length => length })
-		 @logger.info("1: list_blobs #{blob.name} #{offset} #{length}")
+		 if (@debug_until > @processed) then @logger.info("1: list_blobs #{blob.name} #{offset} #{length}") end
              end
            end
          end
