@@ -1,34 +1,38 @@
+## 0.11.2
+  - implemented path_filters to to use path filtering like this **/*.log
+  - implemented debug_until to debug only at the start of a pipeline until it processed enough messages
+
 ## 0.11.1
   - copied changes from irnc fork (danke!)
-  - Fixed trying to load the registry, three time is the charm
+  - fixed trying to load the registry, three time is the charm
   - logs are less chatty, changed info to debug
 
 ## 0.11.0
-  - Implemented start_fresh to skip all previous logs and start monitoring new entries
-  - Fixed the timer, now properly sleep the interval and check again
+  - implemented start_fresh to skip all previous logs and start monitoring new entries
+  - fixed the timer, now properly sleep the interval and check again
   - Work around for a Faraday Middleware v.s. Azure Storage Account bug in follow_redirect
 
 ## 0.10.6
-  - Fixed the rootcause of the checking the codec. Now compare the classname.
+  - fixed the rootcause of the checking the codec. Now compare the classname.
 
 ## 0.10.5
-  - Previous fix broke codec = "line"
+  - previous fix broke codec = "line"
 
 ## 0.10.4
-  - Fixed JSON parsing error for partial files because somehow (logstash 7?) @codec.is_a? doesn't work anymore
+  - fixed JSON parsing error for partial files because somehow (logstash 7?) @codec.is_a? doesn't work anymore
 
 ## 0.10.3
-  - Fixed issue-1 where iplookup confguration was removed, but still used 
+  - fixed issue-1 where iplookup confguration was removed, but still used 
   - iplookup is now done by a separate plugin named logstash-filter-weblookup
 
 ## 0.10.2
   - moved iplookup to own plugin logstash-filter-lookup
 
 ## 0.10.1
-  - Implemented iplookup
-  - Fixed sas tokens (maybe)
-  - Introduced dns_suffix
+  - implemented iplookup
+  - fixed sas tokens (maybe)
+  - introduced dns_suffix
 
 ## 0.10.0
-  - Plugin created with the logstash plugin generator
-  - Reimplemented logstash-input-azureblob with incompatible config and data/registry
+  - plugin created with the logstash plugin generator
+  - reimplemented logstash-input-azureblob with incompatible config and data/registry
