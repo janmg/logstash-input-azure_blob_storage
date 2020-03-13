@@ -224,10 +224,15 @@ def run(queue)
                 @processed += wadiislog(queue, name)
             else
                 counter = 0
-                @codec.decode(chunk) do |event|
+                begin
+                  @codec.decode(chunk) do |event|
                     counter += 1
                     decorate(event)
                     queue << event
+                  end
+                rescue Exception e
+                    @logger.error(@pipe_id+" codec exception: #{e.message} .. will continue and pretend this never happened")
+                    @logger.debug(@pipe_id+" #{chunk}")
                 end
                 @processed += counter
             end
@@ -337,6 +342,7 @@ def list_blobs(fill)
     nextMarker = nil
     for counter in 1..3
       begin
+        loop do
          blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
          blobs.each do |blob|
 # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
@@ -355,6 +361,7 @@ def list_blobs(fill)
          end
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
+        end
       rescue Exception => e
         @logger.error(@pipe_id+" caught: #{e.message} for attempt #{counter} of 3")
 	counter += 1
@@ -386,6 +393,7 @@ def learn_encapsulation
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
     return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
+    # TODO add check for empty blocks and log error that the header and footer can't be learned and must be set in the config
     @logger.debug(@pipe_id+" using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
     @logger.debug(@pipe_id+" learned header: #{@head}")

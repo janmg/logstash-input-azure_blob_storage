@@ -1,3 +1,7 @@
+## 0.11.3
+  - don't crash on failed codec, e.g. gzip_lines could sometimes have a corrupted file?
+  - fix nextmarker loop so that more than 5000 files (or 15000 if faraday doesn't crash) 
+
 ## 0.11.2
   - implemented path_filters to to use path filtering like this **/*.log
   - implemented debug_until to debug only at the start of a pipeline until it processed enough messages
@@ -10,7 +14,7 @@
 ## 0.11.0
   - implemented start_fresh to skip all previous logs and start monitoring new entries
   - fixed the timer, now properly sleep the interval and check again
-  - Work around for a Faraday Middleware v.s. Azure Storage Account bug in follow_redirect
+  - work around for a Faraday Middleware v.s. Azure Storage Account bug in follow_redirect
 
 ## 0.10.6
   - fixed the rootcause of the checking the codec. Now compare the classname.
