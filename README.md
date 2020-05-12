@@ -6,7 +6,7 @@ It is fully free and fully open source. The license is Apache 2.0, meaning you a
 
 ## Documentation
 
-All plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/).
+All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/).
 
 ## Need Help?
 
@@ -15,14 +15,56 @@ Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/log
 ## Purpose
 This plugin can read from Azure Storage Blobs, for instance diagnostics logs for NSG flow logs or accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
-
-After every interval it will write a registry to the storageaccount to save the information of how many bytes per blob (file) are read and processed. After all files are processed and at least one interval has passed a new file list is generated and a worklist is constructed that will be processed. When a file has already been processed before, partial files are read from the offset to the filesize at the time of the file listing. If the codec is JSON partial files will be have the header and tail will be added. They can be configured. If logtype is nsgflowlog, the plugin will process the splitting into individual tuple events. The logtype wadiis may in the future be used to process the grok formats to split into log lines. Any other format is fed into the queue as one event per file or partial file. It's then up to the filter to split and mutate the file format. use source => message in the filter {} block.
-
+This 
 ## Installation 
 This plugin can be installed through logstash-plugin
 ```
 logstash-plugin install logstash-input-azure_blob_storage
 ```
+
+## Minimal Configuration
+The minimum configuration required as input is storageaccount, access_key and container.
+
+```
+input {
+    azure_blob_storage {
+        storageaccount => "yourstorageaccountname"
+        access_key => "Ba5e64c0d3=="
+        container => "insights-logs-networksecuritygroupflowevent"
+    }
+}
+```
+
+## Additional Configuration
+The registry_create_policy is used when the pipeline is started to either resume from the last known unprocessed file, or to start_fresh ignoring old files or start_over to process all the files from the beginning.
+
+interval defines the minimum time the registry should be saved to the registry file (by default 'data/registry.dat'), this is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
+
+During the pipeline start the plugin uses one file to learn how the JSON header and tail look like, they can also be configured manually.
+
+## Running the pipeline
+The pipeline can be started in several ways.
+ - On the commandline
+   ```
+   /usr/share/logstash/bin/logtash -f /etc/logstash/pipeline.d/test.yml
+   ```
+ - In the pipeline.yml
+   ```
+   /etc/logstash/pipeline.yml
+   pipe.id = test
+   pipe.path = /etc/logstash/pipeline.d/test.yml
+   ```
+ - As managed pipeline from Kibana
+
+Logstash itself (so not specific to this plugin) has a feature where multiple instances can run on the same system. The default TCP port is 9600, but if it's already in use it will use 9601 (and up). To update a config file on a running instance on the commandline you can add the argument --config.reload.automatic and if you modify the files that are in the pipeline.yml you can send a SIGHUP channel to reload the pipelines where the config was changed. 
+[https://www.elastic.co/guide/en/logstash/current/reloading-config.html](https://www.elastic.co/guide/en/logstash/current/reloading-config.html)
+
+## Internal Working 
+When the plugin is started, it will read all the filenames and sizes in the blob store excluding the directies of files that are excluded by the "path_filters". After every interval it will write a registry to the storageaccount to save the information of how many bytes per blob (file) are read and processed. After all files are processed and at least one interval has passed a new file list is generated and a worklist is constructed that will be processed. When a file has already been processed before, partial files are read from the offset to the filesize at the time of the file listing. If the codec is JSON partial files will be have the header and tail will be added. They can be configured. If logtype is nsgflowlog, the plugin will process the splitting into individual tuple events. The logtype wadiis may in the future be used to process the grok formats to split into log lines. Any other format is fed into the queue as one event per file or partial file. It's then up to the filter to split and mutate the file format.
+
+By default the root of the json message is named "message" so you can modify the content in the filter block
+
+The configurations and the rest of the code are in [https://github.com/janmg/logstash-input-azure_blob_storage/tree/master/lib/logstash/inputs](lib/logstash/inputs) [https://github.com/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb#L10](azure_blob_storage.rb)
 
 ## Enabling NSG Flowlogs
 1. Enable Network Watcher in your regions
@@ -39,7 +81,6 @@ logstash-plugin install logstash-input-azure_blob_storage
    - Access key (key1 or key2)
 
 ## Troubleshooting
-
 The default loglevel can be changed in global logstash.yml. On the info level, the plugin save offsets to the registry every interval and will log statistics of processed events (one ) plugin will print for each pipeline the first 6 characters of the ID, in DEBUG the yml log level debug shows details of number of events per (partial) files that are read. 
 ```
 log.level
@@ -51,9 +92,7 @@ curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/j
 ```
 
 
-## Configuration Examples
-The minimum configuration required as input is storageaccount, access_key and container.
-
+## Other Configuration Examples
 For nsgflowlogs, a simple configuration looks like this
 ```
 input {
@@ -85,7 +124,6 @@ output {
 }
 ```
 
-It's possible to specify the optional parameters to overwrite the defaults. The iplookup, use_redis and iplist parameters are used for additional information about the source and destination ip address. Redis can be used for caching the results and iplist is to configure an array of ip addresses.
 ```
 input {
     azure_blob_storage {
