@@ -143,6 +143,8 @@ def register
     if registry_create_policy == "start_fresh"
         @logger.info(@pipe_id+" starting fresh")
         @registry = list_blobs(true)
+	save_registry(@registry)
+	@logger.info("writing the registry, it contains #{@registry.size} entries")
     end
 
     @is_json = false
@@ -193,10 +195,10 @@ def run(queue)
             newreg.store(name, { :offset => off, :length => file[:length] })
 	    if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
 	end
-        
         # Worklist is the subset of files where the already read offset is smaller than the file size
 	worklist.clear
 	worklist = newreg.select {|name,file| file[:offset] < file[:length]}
+	if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
         # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
             #res = resource(name)
@@ -230,7 +232,7 @@ def run(queue)
                     decorate(event)
                     queue << event
                   end
-                rescue Exception e
+                rescue Exception => e
                     @logger.error(@pipe_id+" codec exception: #{e.message} .. will continue and pretend this never happened")
                     @logger.debug(@pipe_id+" #{chunk}")
                 end
@@ -252,7 +254,8 @@ def run(queue)
             end
         end
         # Save the registry and sleep until the remaining polling interval is over
-        save_registry(@registry)
+	if (@debug_until > @processed) then @logger.info("going to sleep for #{interval - (Time.now.to_i - chrono)} seconds") end
+	save_registry(@registry)
         sleeptime = interval - (Time.now.to_i - chrono)
         Stud.stoppable_sleep(sleeptime) { stop? }
     end
@@ -338,35 +341,41 @@ end
 # list all blobs in the blobstore, set the offsets from the registry and return the filelist
 # inspired by: https://github.com/Azure-Samples/storage-blobs-ruby-quickstart/blob/master/example.rb
 def list_blobs(fill)
-    files = Hash.new
-    nextMarker = nil
-    for counter in 1..3
-      begin
-        loop do
+    tries ||= 3
+    begin
+        return try_list_blobs(fill)
+    rescue Exception => e
+        @logger.error(@pipe_id+" caught: #{e.message} for list_blobs retries left #{tries}")
+        if (tries -= 1) > 0
+           retry
+        end
+    end
+end
+
+def try_list_blobs(fill)
+# inspired by: http://blog.mirthlab.com/2012/05/25/cleanly-retrying-blocks-of-code-after-an-exception-in-ruby/
+     files = Hash.new
+  	nextMarker = nil
+	loop do
          blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
          blobs.each do |blob|
 # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
 # FNM_EXTGLOB allows you to use "test{a,b,c}" to match either "testa", "testb" or "testc" (closer to shell behavior)
            unless blob.name == registry_path
-	     if @path_filters.any? {|path| File.fnmatch?(path, blob.name, File::FNM_PATHNAME | File::FNM_EXTGLOB)}
+             if @path_filters.any? {|path| File.fnmatch?(path, blob.name, File::FNM_PATHNAME | File::FNM_EXTGLOB)}
                  length = blob.properties[:content_length].to_i
                  offset = 0
                  if fill
                      offset = length
                  end
                  files.store(blob.name, { :offset => offset, :length => length })
-		 if (@debug_until > @processed) then @logger.info("1: list_blobs #{blob.name} #{offset} #{length}") end
+                 if (@debug_until > @processed) then @logger.info("1: list_blobs #{blob.name} #{offset} #{length}") end
              end
            end
          end
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
         end
-      rescue Exception => e
-        @logger.error(@pipe_id+" caught: #{e.message} for attempt #{counter} of 3")
-	counter += 1
-      end
-    end
     return files
 end
 

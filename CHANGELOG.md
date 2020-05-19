@@ -1,3 +1,7 @@
+## 0.11.4
+  - fixed listing 3 times, rather than retrying to list max 3 times
+  - added log entries for better tracing in which phase the application is now
+
 ## 0.11.3
   - don't crash on failed codec, e.g. gzip_lines could sometimes have a corrupted file?
   - fix nextmarker loop so that more than 5000 files (or 15000 if faraday doesn't crash) 
