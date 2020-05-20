@@ -144,7 +144,7 @@ def register
         @logger.info(@pipe_id+" starting fresh")
         @registry = list_blobs(true)
 	save_registry(@registry)
-	@logger.info("writing the registry, it contains #{@registry.size} entries")
+	@logger.info("writing the registry, it contains #{@registry.size} blobs/files")
     end
 
     @is_json = false
@@ -354,7 +354,8 @@ end
 
 def try_list_blobs(fill)
 # inspired by: http://blog.mirthlab.com/2012/05/25/cleanly-retrying-blocks-of-code-after-an-exception-in-ruby/
-     files = Hash.new
+    chrono = Time.now.to_i
+   	files = Hash.new
   	nextMarker = nil
 	loop do
          blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
@@ -376,6 +377,7 @@ def try_list_blobs(fill)
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
         end
+	if (@debug_until > @processed) then @logger.info(@pipe_id+" list_blobs took #{Time.now.to_i - chrono} sec") end
     return files
 end
 
