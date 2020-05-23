@@ -1,6 +1,11 @@
 ## 0.11.4
   - fixed listing 3 times, rather than retrying to list max 3 times
-  - added log entries for better tracing in which phase the application is now
+  - added option to migrate/save to using local registry
+  - rewrote interval timing
+  - reduced saving of registry to maximum once per interval, protect duplicate simultanious writes
+  - added debug_timer for better tracing how long operations take
+  - removing pipeline name from logfiles, logstash 7.6 and up have this in the log4j2 by default now
+  - moved initialization from register to run. should make logs more readable
 
 ## 0.11.3
   - don't crash on failed codec, e.g. gzip_lines could sometimes have a corrupted file?

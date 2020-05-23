@@ -39,6 +39,9 @@ config :container, :validate => :string, :default => 'insights-logs-networksecur
 # The default, `data/registry`, it contains a Ruby Marshal Serialized Hash of the filename the offset read sofar and the filelength the list time a filelisting was done.
 config :registry_path, :validate => :string, :required => false, :default => 'data/registry.dat'
 
+# If registry_local_path is set to a directory on the local server, the registry is save there instead of the remote blob_storage 
+config :registry_local_path, :validate => :string, :required => false
+
 # The default, `resume`, will load the registry offsets and will start processing files from the offsets.
 # When set to `start_over`, all log files are processed from begining.
 # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
@@ -57,6 +60,9 @@ config :interval, :validate => :number, :default => 60
 
 # debug_until will for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. This is a lightweight alternative to switching the loglevel from info to debug or even trace 
 config :debug_until, :validate => :number, :default => 0, :required => false
+
+# debug_timer show time spent on activities
+config :debug_timer, :validate => :boolean, :default => false, :required => false
 
 # WAD IIS Grok Pattern
 #config :grokpattern, :validate => :string, :required => false, :default => '%{TIMESTAMP_ISO8601:log_timestamp} %{NOTSPACE:instanceId} %{NOTSPACE:instanceId2} %{IPORHOST:ServerIP} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:httpVersion} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}'
@@ -90,12 +96,15 @@ config :path_filters, :validate => :array, :default => ['**/*'], :required => fa
 public
 def register
     @pipe_id = Thread.current[:name].split("[").last.split("]").first
-    @logger.info("=== "+config_name+" / "+@pipe_id+" / "+@id[0,6]+" ===")
-    #@logger.info("ruby #{ RUBY_VERSION }p#{ RUBY_PATCHLEVEL } / #{Gem.loaded_specs[config_name].version.to_s}")
+    @logger.info("=== #{config_name} #{Gem.loaded_specs["logstash-input-"+config_name].version.to_s} / #{@pipe_id} / #{@id[0,6]} / ruby #{ RUBY_VERSION }p#{ RUBY_PATCHLEVEL } ===")
     @logger.info("If this plugin doesn't work, please raise an issue in https://github.com/janmg/logstash-input-azure_blob_storage")
     # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
     # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
+end
 
+
+
+def run(queue)
     # counter for all processed events since the start of this pipeline
     @processed = 0
     @regsaved = @processed
@@ -127,24 +136,38 @@ def register
 
     @registry = Hash.new
     if registry_create_policy == "resume"
-     @logger.info(@pipe_id+" resuming from registry")
      for counter in 1..3
        begin
-          @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
-          #[0] headers [1] responsebody
+          if (!@registry_local_path.nil?)
+              unless File.file?(@registry_local_path+"/"+@pipe_id)
+                  @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+                  #[0] headers [1] responsebody
+                  @logger.info("migrating from remote registry #{registry_path}")
+              else
+                  if !Dir.exist?(@registry_local_path)
+                      FileUtils.mkdir_p(@registry_local_path)
+                  end
+                  @registry = Marshal.load(File.read(@registry_local_path+"/"+@pipe_id))
+                  @logger.info("resuming from local registry #{registry_local_path+"/"+@pipe_id}")
+              end
+          else
+              @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+              #[0] headers [1] responsebody
+              @logger.info("resuming from remote registry #{registry_path}")
+          end
+          break
         rescue Exception => e
-          @logger.error(@pipe_id+" caught: #{e.message}")
+          @logger.error("caught: #{e.message}")
           @registry.clear
-          @logger.error(@pipe_id+" loading registry failed for attempt #{counter} of 3")
+          @logger.error("loading registry failed for attempt #{counter} of 3")
         end
       end
     end
     # read filelist and set offsets to file length to mark all the old files as done
     if registry_create_policy == "start_fresh"
-        @logger.info(@pipe_id+" starting fresh")
         @registry = list_blobs(true)
 	save_registry(@registry)
-	@logger.info("writing the registry, it contains #{@registry.size} blobs/files")
+	@logger.info("starting fresh, writing a clean the registry to contain #{@registry.size} blobs/files")
     end
 
     @is_json = false
@@ -164,27 +187,32 @@ def register
         if file_tail
            @tail = file_tail
         end
-        @logger.info(@pipe_id+" head will be: #{@head} and tail is set to #{@tail}")
+        @logger.info("head will be: #{@head} and tail is set to #{@tail}")
     end
-end # def register
 
-
-
-def run(queue)
     newreg   = Hash.new
     filelist = Hash.new
     worklist = Hash.new
-    # we can abort the loop if stop? becomes true
+    @last = start = Time.now.to_i
+
+    # This is the main loop, it
+    # 1. Lists all the files in the remote storage account that match the path prefix
+    # 2. Filters on path_filters to only include files that match the directory and file glob (**/*.json)
+    # 3. Save the listed files in a registry of known files and filesizes.
+    # 4. List all the files again and compare the registry with the new filelist and put the delta in a worklist
+    # 5. Process the worklist and put all events in the logstash queue.
+    # 6. if there is time left, sleep to complete the interval. If processing takes more than an inteval, save the registry and continue.
+    # 7. If stop signal comes, finish the current file, save the registry and quit
     while !stop?
-        chrono = Time.now.to_i
         # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
         # TODO: sort by timestamp ?
         #filelist.sort_by(|k,v|resource(k)[:date])
 	worklist.clear
 	filelist.clear
         newreg.clear
+
+	# Listing all the files
         filelist = list_blobs(false)
-	# registry.merge(filelist) {|key, :offset, :length| :offset.merge :length }
         filelist.each do |name, file|
             off = 0
             begin
@@ -199,9 +227,11 @@ def run(queue)
 	worklist.clear
 	worklist = newreg.select {|name,file| file[:offset] < file[:length]}
 	if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
-        # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
+
+        # Start of processing
+	# This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         worklist.each do |name, file|
-            #res = resource(name)
+            start = Time.now.to_i
             if (@debug_until > @processed) then @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}") end
             size = 0
             if file[:offset] == 0
@@ -209,16 +239,16 @@ def run(queue)
                 size=chunk.size
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
-                @logger.info(@pipe_id+" partial file #{name} from #{file[:offset]} to #{file[:length]}")
+                @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:length]}")
             end
             if logtype == "nsgflowlog" && @is_json
                 res = resource(name)
                 begin
 		    fingjson = JSON.parse(chunk)
                     @processed += nsgflowlog(queue, fingjson)
-                    @logger.debug(@pipe_id+" Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
+                    @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
                 rescue JSON::ParserError
-                    @logger.error(@pipe_id+" parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
+                    @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
             # TODO: Convert this to line based grokking.
             # TODO: ECS Compliance?
@@ -233,30 +263,32 @@ def run(queue)
                     queue << event
                   end
                 rescue Exception => e
-                    @logger.error(@pipe_id+" codec exception: #{e.message} .. will continue and pretend this never happened")
-                    @logger.debug(@pipe_id+" #{chunk}")
+                    @logger.error("codec exception: #{e.message} .. will continue and pretend this never happened")
+                    @logger.debug("#{chunk}")
                 end
                 @processed += counter
             end
             @registry.store(name, { :offset => size, :length => file[:length] })
             # TODO add input plugin option to prevent connection cache
             @blob_client.client.reset_agents!
-	    #@logger.info(@pipe_id+" name #{name} size #{size} len #{file[:length]}")
+	    #@logger.info("name #{name} size #{size} len #{file[:length]}")
             # if stop? good moment to stop what we're doing
             if stop?
                 return
             end
-            # save the registry past the regular intervals
-            now = Time.now.to_i
-            if ((now - chrono) > interval)
+	    if ((Time.now.to_i - @last) > @interval)
                 save_registry(@registry)
-		chrono += interval
             end
         end
-        # Save the registry and sleep until the remaining polling interval is over
-	if (@debug_until > @processed) then @logger.info("going to sleep for #{interval - (Time.now.to_i - chrono)} seconds") end
-	save_registry(@registry)
-        sleeptime = interval - (Time.now.to_i - chrono)
+	# The files that got processed after the last registry save need to be saved too, in case the worklist is empty for some intervals.
+        now = Time.now.to_i
+	if ((now - @last) > @interval)
+            save_registry(@registry)
+        end
+        sleeptime = interval - ((now - start) % interval)
+	if @debug_timer
+            @logger.info("going to sleep for #{sleeptime} seconds")
+        end
         Stud.stoppable_sleep(sleeptime) { stop? }
     end
 end
@@ -345,7 +377,7 @@ def list_blobs(fill)
     begin
         return try_list_blobs(fill)
     rescue Exception => e
-        @logger.error(@pipe_id+" caught: #{e.message} for list_blobs retries left #{tries}")
+        @logger.error("caught: #{e.message} for list_blobs retries left #{tries}")
         if (tries -= 1) > 0
            retry
         end
@@ -354,10 +386,11 @@ end
 
 def try_list_blobs(fill)
 # inspired by: http://blog.mirthlab.com/2012/05/25/cleanly-retrying-blocks-of-code-after-an-exception-in-ruby/
-    chrono = Time.now.to_i
-   	files = Hash.new
-  	nextMarker = nil
-	loop do
+   chrono = Time.now.to_i
+   files = Hash.new
+   nextMarker = nil
+   counter = 1
+   loop do
          blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
          blobs.each do |blob|
 # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
@@ -376,24 +409,40 @@ def try_list_blobs(fill)
          end
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
+	 if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
+         counter+=1
         end
-	if (@debug_until > @processed) then @logger.info(@pipe_id+" list_blobs took #{Time.now.to_i - chrono} sec") end
+        if @debug_timer
+            @logger.info("list_blobs took #{Time.now.to_i - chrono} sec")
+        end
     return files
 end
 
 # When events were processed after the last registry save, start a thread to update the registry file.
 def save_registry(filelist)
-    # TODO because of threading, processed values and regsaved are not thread safe, they can change as instance variable @!
+    # Because of threading, processed values and regsaved are not thread safe, they can change as instance variable @! Most of the time this is fine because the registry is the last resort, but be careful about corner cases!
     unless @processed == @regsaved
         @regsaved = @processed
-        @logger.info(@pipe_id+" processed #{@processed} events, saving #{filelist.size} blobs and offsets to registry #{registry_path}")
-        Thread.new {
+        unless (@busy_writing_registry)
+	Thread.new {
             begin
-                @blob_client.create_block_blob(container, registry_path, Marshal.dump(filelist))
+                @busy_writing_registry = true
+                unless (@registry_local_path)
+                    @blob_client.create_block_blob(container, registry_path, Marshal.dump(filelist))
+                    @logger.info("processed #{@processed} events, saving #{filelist.size} blobs and offsets to remote registry #{registry_path}")
+                else
+                    File.open(@registry_local_path+"/"+@pipe_id, 'w') { |file| file.write(Marshal.dump(filelist)) }
+                    @logger.info("processed #{@processed} events, saving #{filelist.size} blobs and offsets to local registry #{registry_local_path+"/"+@pipe_id}")
+                end
+                @busy_writing_registry = false
+                @last = Time.now.to_i
             rescue
-                @logger.error(@pipe_id+" Oh my, registry write failed, do you have write access?")
+                @logger.error("Oh my, registry write failed, do you have write access?")
             end
         }
+        else
+            @logger.info("Skipped writing the registry because previous write still in progress, it just takes long or may be hanging!")
+        end
     end
 end
 
@@ -405,13 +454,13 @@ def learn_encapsulation
     return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
     # TODO add check for empty blocks and log error that the header and footer can't be learned and must be set in the config
-    @logger.debug(@pipe_id+" using #{blob.name} to learn the json header and tail")
+    @logger.debug("using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
-    @logger.debug(@pipe_id+" learned header: #{@head}")
+    @logger.debug("learned header: #{@head}")
     length = blob.properties[:content_length].to_i
     offset = length - blocks.last.size
     @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
-    @logger.debug(@pipe_id+" learned tail: #{@tail}")
+    @logger.debug("learned tail: #{@tail}")
 end
 
 def resource(str)

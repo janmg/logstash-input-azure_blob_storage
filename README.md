@@ -40,7 +40,11 @@ The registry_create_policy is used when the pipeline is started to either resume
 
 interval defines the minimum time the registry should be saved to the registry file (by default 'data/registry.dat'), this is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
 
-During the pipeline start the plugin uses one file to learn how the JSON header and tail look like, they can also be configured manually.
+When registry_local_path is set to a directory, the registry is save on the logstash server in that directory. The filename is the pipe.id
+
+with registry_create_policy set to resume and the registry_local_path set to a directory where the registry isn't yet created, should load from the storage account and save the registry on the local server
+
+During the pipeline start for JSON codec, the plugin uses one file to learn how the JSON header and tail look like, they can also be configured manually.
 
 ## Running the pipeline
 The pipeline can be started in several ways.
@@ -91,6 +95,7 @@ The log level of the plugin can be put into DEBUG through
 curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/json' -d'{"logger.logstash.inputs.azureblobstorage" : "DEBUG"}'
 ```
 
+because debug also makes logstash chatty, there are also debug_timer and debug_until that can be used to print additional informantion on what the pipeline is doing and how long it takes. debug_until is for the number of events until debug is disabled.
 
 ## Other Configuration Examples
 For nsgflowlogs, a simple configuration looks like this
@@ -176,7 +181,7 @@ filter {
     remove_field => ["subresponse"]
     remove_field => ["username"]
     remove_field => ["clientPort"]
-    remove_field => ["port"]
+    remove_field => ["port"]:0
     remove_field => ["timestamp"]
   }
 }
