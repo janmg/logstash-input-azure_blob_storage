@@ -1,3 +1,7 @@
+## 0.11.5
+  - Added optional filename into the message
+  - plumbing for emulator, start_over not learning from registry
+
 ## 0.11.4
   - fixed listing 3 times, rather than retrying to list max 3 times
   - added option to migrate/save to using local registry

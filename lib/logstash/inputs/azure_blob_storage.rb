@@ -25,6 +25,9 @@ config :storageaccount, :validate => :string, :required => false
 # DNS Suffix other then blob.core.windows.net
 config :dns_suffix, :validate => :string, :required => false, :default => 'core.windows.net'
 
+# For development this can be used to emulate an accountstorage when not available from azure
+#config :use_development_storage, :validate => :boolean, :required => false
+
 # The (primary or secondary) Access Key for the the storage account. The key can be found in the portal.azure.com or through the azure api StorageAccounts/ListKeys. For example the PowerShell command Get-AzStorageAccountKey.
 config :access_key, :validate => :password, :required => false
 
@@ -58,6 +61,7 @@ config :registry_create_policy, :validate => ['resume','start_over','start_fresh
 # Z00000000000000000000000000000000 2     ]}
 config :interval, :validate => :number, :default => 60
 
+config :addfilename, :validate => :boolean, :default => false, :required => false
 # debug_until will for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. This is a lightweight alternative to switching the loglevel from info to debug or even trace 
 config :debug_until, :validate => :number, :default => 0, :required => false
 
@@ -127,11 +131,15 @@ def run(queue)
     unless conn.nil?
         @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(conn)
     else
+#        unless use_development_storage?
         @blob_client = Azure::Storage::Blob::BlobService.create(
             storage_account_name: storageaccount,
 	    storage_dns_suffix: dns_suffix,
             storage_access_key: access_key.value,
         )
+#        else
+#            @logger.info("not yet implemented")
+#        end
     end
 
     @registry = Hash.new
@@ -223,6 +231,7 @@ def run(queue)
             newreg.store(name, { :offset => off, :length => file[:length] })
 	    if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
 	end
+        # size nilClass when the list doesn't grow?!
         # Worklist is the subset of files where the already read offset is smaller than the file size
 	worklist.clear
 	worklist = newreg.select {|name,file| file[:offset] < file[:length]}
@@ -245,7 +254,7 @@ def run(queue)
                 res = resource(name)
                 begin
 		    fingjson = JSON.parse(chunk)
-                    @processed += nsgflowlog(queue, fingjson)
+                    @processed += nsgflowlog(queue, fingjson, name)
                     @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
                 rescue JSON::ParserError
                     @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
@@ -260,6 +269,10 @@ def run(queue)
                   @codec.decode(chunk) do |event|
                     counter += 1
                     decorate(event)
+                    if @addfilename
+                      @logger.info("filename: #{name}")
+                      event.set('filename', name)
+                    end
                     queue << event
                   end
                 rescue Exception => e
@@ -327,7 +340,7 @@ end
 
 
 
-def nsgflowlog(queue, json)
+def nsgflowlog(queue, json, name)
     count=0
     json["records"].each do |record|
       res = resource(record["resourceId"])
@@ -345,6 +358,10 @@ def nsgflowlog(queue, json)
                   @logger.trace(ev.to_s)
                   event = LogStash::Event.new('message' => ev.to_json)
                   decorate(event)
+                  if @addfilename
+                      @logger.info("filename: #{name}")
+                      event.set('filename', name)
+                  end
                   queue << event
                   count+=1
               end
@@ -450,10 +467,15 @@ def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
     # If the blobstorage can't be found, an error from farraday middleware will come with the text
     # org.jruby.ext.set.RubySet cannot be cast to class org.jruby.RubyFixnum
+    if @registry_create_policy == "start_over"
+      @prefix = "resourceId=/"
+    end
     blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
     return if blob.nil?
     blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
     # TODO add check for empty blocks and log error that the header and footer can't be learned and must be set in the config
+    # Azure::Core::Http::HTTPError
+    # Also catch the size nilClass
     @logger.debug("using #{blob.name} to learn the json header and tail")
     @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
     @logger.debug("learned header: #{@head}")
