@@ -10,21 +10,22 @@ All logstash plugin documentation are placed under one [central location](http:/
 
 ## Need Help?
 
-Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum. For real problems or feature requests, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will ionly be merged after discussion through an issue.
+Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum. For real problems or feature requests, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will only be merged after discussion through an issue.
 
 ## Purpose
 This plugin can read from Azure Storage Blobs, for instance diagnostics logs for NSG flow logs or accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
-This 
+
 ## Installation 
 This plugin can be installed through logstash-plugin
 ```
-logstash-plugin install logstash-input-azure_blob_storage
+/usr/share/logstash/bin/logstash-plugin install logstash-input-azure_blob_storage
 ```
 
 ## Minimal Configuration
 The minimum configuration required as input is storageaccount, access_key and container.
 
+/etc/logstash/conf.d/test.conf
 ```
 input {
     azure_blob_storage {
@@ -50,13 +51,13 @@ During the pipeline start for JSON codec, the plugin uses one file to learn how 
 The pipeline can be started in several ways.
  - On the commandline
    ```
-   /usr/share/logstash/bin/logtash -f /etc/logstash/pipeline.d/test.yml
+   /usr/share/logstash/bin/logtash -f /etc/logstash/conf.d/test.conf
    ```
  - In the pipeline.yml
    ```
    /etc/logstash/pipeline.yml
    pipe.id = test
-   pipe.path = /etc/logstash/pipeline.d/test.yml
+   pipe.path = /etc/logstash/conf.d/test.conf
    ```
  - As managed pipeline from Kibana
 
@@ -95,7 +96,7 @@ The log level of the plugin can be put into DEBUG through
 curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/json' -d'{"logger.logstash.inputs.azureblobstorage" : "DEBUG"}'
 ```
 
-because debug also makes logstash chatty, there are also debug_timer and debug_until that can be used to print additional informantion on what the pipeline is doing and how long it takes. debug_until is for the number of events until debug is disabled.
+Because debug also makes logstash chatty, there are also debug_timer and debug_until that can be used to print additional information on what the pipeline is doing and how long it takes. debug_until is for the number of events until logging continues without debug.
 
 ## Other Configuration Examples
 For nsgflowlogs, a simple configuration looks like this
@@ -122,27 +123,45 @@ filter {
 }
 
 output {
+  stdout { }
+}
+
+output {
     elasticsearch {
         hosts => "elasticsearch"
         index => "nsg-flow-logs-%{+xxxx.ww}"
     }
 }
 ```
-
+A more elaborate input configuration example
 ```
 input {
     azure_blob_storage {
+        codec => "json"
         storageaccount => "yourstorageaccountname"
         access_key => "Ba5e64c0d3=="
         container => "insights-logs-networksecuritygroupflowevent"
-        codec => "json"
         logtype => "nsgflowlog"
         prefix => "resourceId=/"
+        path_filters => ['**/*.json']
+        addfilename => true
         registry_create_policy => "resume"
+        registry_local_path => "/usr/share/logstash/plugin"
         interval => 300
+        debug_timer => 60
+        debug_until => 100
+    }
+}
+
+output {
+    elasticsearch {
+        hosts => "elasticsearch"
+        index => "nsg-flow-logs-%{+xxxx.ww}"
     }
 }
 ```
+The configuration documentation is in the first 100 lines of the code
+[GITHUB/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb](https://github.com/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb)
 
 For WAD IIS and App Services the HTTP AccessLogs can be retrieved from a storage account as line based events and parsed through GROK. The date stamp can also be parsed with %{TIMESTAMP_ISO8601:log_timestamp}. For WAD IIS logfiles the container is wad-iis-logfiles. In the future grokking may happen already by the plugin.
 ```

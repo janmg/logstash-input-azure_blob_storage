@@ -239,13 +239,19 @@ def run(queue)
 
         # Start of processing
 	# This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
-        worklist.each do |name, file|
+        if (worklist.size > 0) then
+          worklist.each do |name, file|
             start = Time.now.to_i
             if (@debug_until > @processed) then @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}") end
             size = 0
             if file[:offset] == 0
-                chunk = full_read(name)
-                size=chunk.size
+                # This is where Sera4000 issue starts
+                begin
+                    chunk = full_read(name)
+                    size=chunk.size
+                rescue Exception => e
+                    @logger.error("Failed to read #{name} because of: #{e.message} .. will continue and pretend this never happened")
+                end
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
                 @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:length]}")
@@ -268,11 +274,10 @@ def run(queue)
                 begin
                   @codec.decode(chunk) do |event|
                     counter += 1
-                    decorate(event)
                     if @addfilename
-                      @logger.info("filename: #{name}")
                       event.set('filename', name)
                     end
+                    decorate(event)
                     queue << event
                   end
                 rescue Exception => e
@@ -292,6 +297,7 @@ def run(queue)
 	    if ((Time.now.to_i - @last) > @interval)
                 save_registry(@registry)
             end
+          end
         end
 	# The files that got processed after the last registry save need to be saved too, in case the worklist is empty for some intervals.
         now = Time.now.to_i
@@ -339,7 +345,6 @@ def strip_comma(str)
 end
 
 
-
 def nsgflowlog(queue, json, name)
     count=0
     json["records"].each do |record|
@@ -353,15 +358,18 @@ def nsgflowlog(queue, json, name)
                   tups = tup.split(',')
                   ev = rule.merge({:unixtimestamp => tups[0], :src_ip => tups[1], :dst_ip => tups[2], :src_port => tups[3], :dst_port => tups[4], :protocol => tups[5], :direction => tups[6], :decision => tups[7]})
                   if (record["properties"]["Version"]==2)
+                    tups[9] = 0 if tups[9].nil?
+                    tups[10] = 0 if tups[10].nil?
+                    tups[11] = 0 if tups[11].nil?
+                    tups[12] = 0 if tups[12].nil?
                       ev.merge!( {:flowstate => tups[8], :src_pack => tups[9], :src_bytes => tups[10], :dst_pack => tups[11], :dst_bytes => tups[12]} )
                   end
                   @logger.trace(ev.to_s)
+                  if @addfilename
+                      ev.merge!( {:filename => name } )
+                  end
                   event = LogStash::Event.new('message' => ev.to_json)
                   decorate(event)
-                  if @addfilename
-                      @logger.info("filename: #{name}")
-                      event.set('filename', name)
-                  end
                   queue << event
                   count+=1
               end
@@ -463,26 +471,34 @@ def save_registry(filelist)
     end
 end
 
+
 def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
-    # If the blobstorage can't be found, an error from farraday middleware will come with the text
-    # org.jruby.ext.set.RubySet cannot be cast to class org.jruby.RubyFixnum
-    if @registry_create_policy == "start_over"
-      @prefix = "resourceId=/"
+    begin
+        blobs = @blob_client.list_blobs(container, { maxresults: 3, prefix: @prefix})
+        blobs.each do |blob|
+            unless blob.name == registry_path
+              begin
+                blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
+                if blocks.first.name.start_with?('A00')
+                  @logger.debug("using #{blob.name}/#{blocks.first.name} to learn the json header")
+                  @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
+                end
+                if blocks.last.name.start_with?('Z00')
+                  @logger.debug("using #{blob.name}/#{blocks.last.name} to learn the json footer")
+                  length = blob.properties[:content_length].to_i
+                  offset = length - blocks.last.size
+                  @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
+                  @logger.debug("learned tail: #{@tail}")
+                end
+              rescue Exception => e
+                @logger.info("learn json one of the attempts failed #{e.message}")
+              end
+            end
+        end
+    rescue Exception => e
+        @logger.info("learn json header and footer failed because #{e.message}")
     end
-    blob = @blob_client.list_blobs(container, { maxresults: 1, prefix: @prefix }).first
-    return if blob.nil?
-    blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
-    # TODO add check for empty blocks and log error that the header and footer can't be learned and must be set in the config
-    # Azure::Core::Http::HTTPError
-    # Also catch the size nilClass
-    @logger.debug("using #{blob.name} to learn the json header and tail")
-    @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
-    @logger.debug("learned header: #{@head}")
-    length = blob.properties[:content_length].to_i
-    offset = length - blocks.last.size
-    @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
-    @logger.debug("learned tail: #{@tail}")
 end
 
 def resource(str)

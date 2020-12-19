@@ -1,6 +1,9 @@
 ## 0.11.5
-  - Added optional filename into the message
-  - plumbing for emulator, start_over not learning from registry
+  - added optional addfilename to add filename in message
+  - NSGFLOWLOG version 2 uses 0 as value instead of NULL in src and dst values
+  - added connection exception handling when full_read files
+  - rewritten json header footer learning to ignore learning from registry  
+  - plumbing for emulator
 
 ## 0.11.4
   - fixed listing 3 times, rather than retrying to list max 3 times
