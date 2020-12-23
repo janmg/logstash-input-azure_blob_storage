@@ -1,20 +1,23 @@
-# Logstash Plugin
+# Logstash 
 
-This is a plugin for [Logstash](https://github.com/elastic/logstash).
+This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
 
-It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way.
-
-## Documentation
-
-All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/).
-
-## Need Help?
-
-Need help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum. For real problems or feature requests, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will only be merged after discussion through an issue.
+For problems or feature requests with this specific plugin, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will also be welcomed after discussion through an issue.
 
 ## Purpose
-This plugin can read from Azure Storage Blobs, for instance diagnostics logs for NSG flow logs or accesslogs from App Services. 
+This plugin can read from Azure Storage Blobs, for instance JSON diagnostics logs for NSG flow logs or LINE based accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
+
+The plugin depends on the [Ruby library azure-storage-blon](https://rubygems.org/gems/azure-storage-blob/versions/1.1.0) from Microsoft, that depends on Faraday for the HTTPS connection to Azure.
+
+The plugin executes the following steps
+1. Lists all the files in the azure storage account. where the path of the files are matching pathprefix
+2. Filters on path_filters to only include files that match the directory and file glob (e.g. **/*.json)
+3. Save the listed files in a registry of known files and filesizes. (data/registry.dat on azure, or in a file on the logstash instance)
+4. List all the files again and compare the registry with the new filelist and put the delta in a worklist
+5. Process the worklist and put all events in the logstash queue.
+6. if there is time left, sleep to complete the interval. If processing takes more than an inteval, save the registry and continue processing.
+7. If logstash is stopped, a stop signal will try to finish the current file, save the registry and than quit
 
 ## Installation 
 This plugin can be installed through logstash-plugin
@@ -97,7 +100,7 @@ curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/j
 ```
 
 Because debug also makes logstash chatty, there are also debug_timer and debug_until that can be used to print additional information on what the pipeline is doing and how long it takes. debug_until is for the number of events until logging continues without debug.
-
+than 
 ## Other Configuration Examples
 For nsgflowlogs, a simple configuration looks like this
 ```
