@@ -475,7 +475,7 @@ end
 def learn_encapsulation
     # From one file, read first block and last block to learn head and tail
     begin
-        blobs = @blob_client.list_blobs(container, { maxresults: 3, prefix: @prefix})
+        blobs = @blob_client.list_blobs(container, { max_results: 3, prefix: @prefix})
         blobs.each do |blob|
             unless blob.name == registry_path
               begin
