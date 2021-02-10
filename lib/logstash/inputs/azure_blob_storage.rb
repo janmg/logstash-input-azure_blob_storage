@@ -246,6 +246,8 @@ def run(queue)
             size = 0
             if file[:offset] == 0
                 # This is where Sera4000 issue starts
+              # For an append blob, reading full and crashing, retry, last_modified? ... lenght? ... committed? ...
+              # length and skip reg value
                 begin
                     chunk = full_read(name)
                     size=chunk.size
@@ -272,7 +274,7 @@ def run(queue)
             else
                 counter = 0
                 begin
-                  @codec.decode(chunk) do |event|
+                    @codec.decode(chunk) do |event|
                     counter += 1
                     if @addfilename
                       event.set('filename', name)
