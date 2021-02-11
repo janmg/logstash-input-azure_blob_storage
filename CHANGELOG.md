@@ -1,3 +1,8 @@
+## 0.11.6
+  - fix in json head and tail learning the max_results
+  - broke out connection setup in order to call it again if connection exceptions come
+  - deal better with skipping of empty files.
+
 ## 0.11.5
   - added optional addfilename to add filename in message
   - NSGFLOWLOG version 2 uses 0 as value instead of NULL in src and dst values

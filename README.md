@@ -40,15 +40,17 @@ input {
 ```
 
 ## Additional Configuration
-The registry_create_policy is used when the pipeline is started to either resume from the last known unprocessed file, or to start_fresh ignoring old files or start_over to process all the files from the beginning.
+The registry keeps track of files in the storage account, their size and how many bytes have been processed. Files can grow and the added part will be processed as a partial file. The registry is saved todisk every interval.
 
-interval defines the minimum time the registry should be saved to the registry file (by default 'data/registry.dat'), this is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
+The registry_create_policy determines at the start of the pipeline if processing should resume from the last known unprocessed file, or to start_fresh ignoring old files and start only processing new events that came after the start of the pipeline. Or start_over to process all the files ignoring the registry.
 
-When registry_local_path is set to a directory, the registry is save on the logstash server in that directory. The filename is the pipe.id
+interval defines the minimum time the registry should be saved to the registry file (by default to 'data/registry.dat'), this is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
 
-with registry_create_policy set to resume and the registry_local_path set to a directory where the registry isn't yet created, should load from the storage account and save the registry on the local server
+When registry_local_path is set to a directory, the registry is saved on the logstash server in that directory. The filename is the pipe.id
 
-During the pipeline start for JSON codec, the plugin uses one file to learn how the JSON header and tail look like, they can also be configured manually.
+with registry_create_policy set to resume and the registry_local_path set to a directory where the registry isn't yet created, should load the registry from the storage account and save the registry on the local server. This allows for a migration to localstorage
+
+For pipelines that use the JSON codec or the JSON_LINE codec, the plugin uses one file to learn how the JSON header and tail look like, they can also be configured manually. Using skip_learning the learning can be disabled.
 
 ## Running the pipeline
 The pipeline can be started in several ways.
@@ -99,8 +101,10 @@ The log level of the plugin can be put into DEBUG through
 curl -XPUT 'localhost:9600/_node/logging?pretty' -H 'Content-Type: application/json' -d'{"logger.logstash.inputs.azureblobstorage" : "DEBUG"}'
 ```
 
-Because debug also makes logstash chatty, there are also debug_timer and debug_until that can be used to print additional information on what the pipeline is doing and how long it takes. debug_until is for the number of events until logging continues without debug.
-than 
+Because logstash debug makes logstash very chatty, the option debug_until will for a number of processed events and stops debuging. One file can easily contain thousands of events. The debug_until is useful to monitor the start of the plugin and the processing of the first files.
+
+debug_timer will show detailed information on how much time listing of files took and how long the plugin will sleep to fill the interval and the listing and processing starts again.
+
 ## Other Configuration Examples
 For nsgflowlogs, a simple configuration looks like this
 ```
@@ -151,7 +155,7 @@ input {
         registry_create_policy => "resume"
         registry_local_path => "/usr/share/logstash/plugin"
         interval => 300
-        debug_timer => 60
+        debug_timer => true
         debug_until => 100
     }
 }
