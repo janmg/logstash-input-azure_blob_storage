@@ -1,3 +1,7 @@
+## 0.11.7
+  - implemented skip_learning
+  - start ignoring failed files and not retry
+
 ## 0.11.6
   - fix in json head and tail learning the max_results
   - broke out connection setup in order to call it again if connection exceptions come
