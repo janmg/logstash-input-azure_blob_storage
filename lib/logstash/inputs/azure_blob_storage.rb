@@ -61,7 +61,9 @@ config :registry_create_policy, :validate => ['resume','start_over','start_fresh
 # Z00000000000000000000000000000000 2     ]}
 config :interval, :validate => :number, :default => 60
 
+# add the filename into the events
 config :addfilename, :validate => :boolean, :default => false, :required => false
+
 # debug_until will for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. This is a lightweight alternative to switching the loglevel from info to debug or even trace 
 config :debug_until, :validate => :number, :default => 0, :required => false
 
@@ -70,6 +72,9 @@ config :debug_timer, :validate => :boolean, :default => false, :required => fals
 
 # WAD IIS Grok Pattern
 #config :grokpattern, :validate => :string, :required => false, :default => '%{TIMESTAMP_ISO8601:log_timestamp} %{NOTSPACE:instanceId} %{NOTSPACE:instanceId2} %{IPORHOST:ServerIP} %{WORD:httpMethod} %{URIPATH:requestUri} %{NOTSPACE:requestQuery} %{NUMBER:port} %{NOTSPACE:username} %{IPORHOST:clientIP} %{NOTSPACE:httpVersion} %{NOTSPACE:userAgent} %{NOTSPACE:cookie} %{NOTSPACE:referer} %{NOTSPACE:host} %{NUMBER:httpStatus} %{NUMBER:subresponse} %{NUMBER:win32response} %{NUMBER:sentBytes:int} %{NUMBER:receivedBytes:int} %{NUMBER:timeTaken:int}'
+
+# skip learning if you use json and don't want to learn the head and tail, but use either the defaults or configure them.
+config :skip_learning, :validate => :boolean, :default => false, :required => false
 
 # The string that starts the JSON. Only needed when the codec is JSON. When partial file are read, the result will not be valid JSON unless the start and end are put back. the file_head and file_tail are learned at startup, by reading the first file in the blob_list and taking the first and last block, this would work for blobs that are appended like nsgflowlogs. The configuration can be set to override the learning. In case learning fails and the option is not set, the default is to use the 'records' as set by nsgflowlogs.
 config :file_head, :validate => :string, :required => false, :default => '{"records":['
@@ -113,34 +118,7 @@ def run(queue)
     @processed = 0
     @regsaved = @processed
 
-    # Try in this order to access the storageaccount
-    # 1. storageaccount / sas_token
-    # 2. connection_string
-    # 3. storageaccount / access_key
-
-    unless connection_string.nil?
-	conn = connection_string.value
-    end
-    unless sas_token.nil?
-        unless sas_token.value.start_with?('?')
-	    conn = "BlobEndpoint=https://#{storageaccount}.#{dns_suffix};SharedAccessSignature=#{sas_token.value}"
-        else
-	    conn = sas_token.value
-    	end
-    end
-    unless conn.nil?
-        @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(conn)
-    else
-#        unless use_development_storage?
-        @blob_client = Azure::Storage::Blob::BlobService.create(
-            storage_account_name: storageaccount,
-	    storage_dns_suffix: dns_suffix,
-            storage_access_key: access_key.value,
-        )
-#        else
-#            @logger.info("not yet implemented")
-#        end
-    end
+    connect
 
     @registry = Hash.new
     if registry_create_policy == "resume"
@@ -175,7 +153,7 @@ def run(queue)
     if registry_create_policy == "start_fresh"
         @registry = list_blobs(true)
 	save_registry(@registry)
-	@logger.info("starting fresh, writing a clean the registry to contain #{@registry.size} blobs/files")
+	@logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
     end
 
     @is_json = false
@@ -188,12 +166,14 @@ def run(queue)
     @tail = ''
     # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
     if @is_json
-        learn_encapsulation
         if file_head
-           @head = file_head
+            @head = file_head
         end
         if file_tail
-           @tail = file_tail
+            @tail = file_tail
+        end
+        if file_head and file_tail and !skip_learning
+            learn_encapsulation
         end
         @logger.info("head will be: #{@head} and tail is set to #{@tail}")
     end
@@ -234,6 +214,8 @@ def run(queue)
         # size nilClass when the list doesn't grow?!
         # Worklist is the subset of files where the already read offset is smaller than the file size
 	worklist.clear
+        chunk = nil
+
 	worklist = newreg.select {|name,file| file[:offset] < file[:length]}
 	if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
 
@@ -246,19 +228,26 @@ def run(queue)
             size = 0
             if file[:offset] == 0
                 # This is where Sera4000 issue starts
-              # For an append blob, reading full and crashing, retry, last_modified? ... lenght? ... committed? ...
-              # length and skip reg value
-                begin
-                    chunk = full_read(name)
-                    size=chunk.size
-                rescue Exception => e
-                    @logger.error("Failed to read #{name} because of: #{e.message} .. will continue and pretend this never happened")
+                # For an append blob, reading full and crashing, retry, last_modified? ... lenght? ... committed? ...
+                # length and skip reg value
+                if (file[:length] > 0)
+                    begin
+                        chunk = full_read(name)
+                        size=chunk.size
+                    rescue Exception => e
+                        @logger.error("Failed to read #{name} because of: #{e.message} .. will continue and pretend this never happened")
+                    end 
+                else
+                    @logger.info("found a zero size file #{name}")
+                    chunk = nil 
                 end
             else
                 chunk = partial_read_json(name, file[:offset], file[:length])
                 @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:length]}")
             end
             if logtype == "nsgflowlog" && @is_json
+              # skip empty chunks
+              unless chunk.nil?
                 res = resource(name)
                 begin
 		    fingjson = JSON.parse(chunk)
@@ -267,6 +256,7 @@ def run(queue)
                 rescue JSON::ParserError
                     @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
                 end
+              end
             # TODO: Convert this to line based grokking.
             # TODO: ECS Compliance?
             elsif logtype == "wadiis" && !@is_json
@@ -284,6 +274,7 @@ def run(queue)
                   end
                 rescue Exception => e
                     @logger.error("codec exception: #{e.message} .. will continue and pretend this never happened")
+                    @registry.store(name, { :offset => file[:length], :length => file[:length] })
                     @logger.debug("#{chunk}")
                 end
                 @processed += counter
@@ -323,8 +314,54 @@ end
 
 
 private
+def connect
+    # Try in this order to access the storageaccount
+    # 1. storageaccount / sas_token
+    # 2. connection_string
+    # 3. storageaccount / access_key
+
+    unless connection_string.nil?
+        conn = connection_string.value
+    end
+    unless sas_token.nil?
+        unless sas_token.value.start_with?('?')
+            conn = "BlobEndpoint=https://#{storageaccount}.#{dns_suffix};SharedAccessSignature=#{sas_token.value}"
+        else
+            conn = sas_token.value
+        end
+    end
+    unless conn.nil?
+        @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(conn)
+    else
+#        unless use_development_storage?
+        @blob_client = Azure::Storage::Blob::BlobService.create(
+            storage_account_name: storageaccount,
+            storage_dns_suffix: dns_suffix,
+            storage_access_key: access_key.value,
+        )
+#        else
+#            @logger.info("not yet implemented")
+#        end
+    end
+end
+
 def full_read(filename)
-    return @blob_client.get_blob(container, filename)[1]
+    tries ||= 2
+    begin
+        return @blob_client.get_blob(container, filename)[1]
+    rescue Exception => e
+        @logger.error("caught: #{e.message} for full_read")
+        if (tries -= 1) > 0
+           if e.message = "Connection reset by peer"
+               connect
+           end
+           retry
+        end
+    end
+    begin
+        chuck = @blob_client.get_blob(container, filename)[1]
+    end
+    return chuck
 end
 
 def partial_read_json(filename, offset, length)
@@ -475,6 +512,7 @@ end
 
 
 def learn_encapsulation
+  @logger.info("learn_encapsulation, this can be skipped by setting skip_learning => true. Or set both head_file and tail_file")
     # From one file, read first block and last block to learn head and tail
     begin
         blobs = @blob_client.list_blobs(container, { max_results: 3, prefix: @prefix})
