@@ -235,7 +235,9 @@ def run(queue)
                         chunk = full_read(name)
                         size=chunk.size
                     rescue Exception => e
-                        @logger.error("Failed to read #{name} because of: #{e.message} .. will continue and pretend this never happened")
+                        @logger.error("Failed to read #{name} because of: #{e.message} .. will continue, set file as read and pretend this never happened")
+                        @logger.error("#{size} size and #{file[:length]} file length")
+                        size = file[:length]
                     end 
                 else
                     @logger.info("found a zero size file #{name}")
