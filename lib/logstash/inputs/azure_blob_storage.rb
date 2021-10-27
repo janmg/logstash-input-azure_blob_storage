@@ -213,7 +213,8 @@ def run(queue)
 	end
         # size nilClass when the list doesn't grow?!
         # Worklist is the subset of files where the already read offset is smaller than the file size
-	worklist.clear
+        @registry = newreg
+        worklist.clear
         chunk = nil
 
 	worklist = newreg.select {|name,file| file[:offset] < file[:length]}

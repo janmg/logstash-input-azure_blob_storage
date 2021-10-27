@@ -1,3 +1,7 @@
+## 0.12.0
+  - version 2 of azure-storage
+  - saving current files registry, not keeping historical files
+
 ## 0.11.7
   - implemented skip_learning
   - start ignoring failed files and not retry
