@@ -389,6 +389,7 @@ end
 
 def nsgflowlog(queue, json, name)
     count=0
+    begin
     json["records"].each do |record|
       res = resource(record["resourceId"])
       resource = { :subscription => res[:subscription], :resourcegroup => res[:resourcegroup], :nsg => res[:nsg] }
@@ -417,6 +418,9 @@ def nsgflowlog(queue, json, name)
               end
           end
       end
+    end
+    rescue Exception => e
+      @logger.error("NSG Flowlog problem for #{name}, with #{json["records"].size} records and error message #{e.message}")
     end
     return count 
 end
