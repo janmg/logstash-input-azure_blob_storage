@@ -1,3 +1,9 @@
+#$ 0.12.2
+  - Fixed the exception handling, not trying to print how many JSON fields there are while catching the exception
+
+## 0.12.1
+  - Catch NSGFLOW logs when the JSON parsing somehow failed
+
 ## 0.12.0
   - version 2 of azure-storage
   - saving current files registry, not keeping historical files

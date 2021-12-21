@@ -420,7 +420,7 @@ def nsgflowlog(queue, json, name)
       end
     end
     rescue Exception => e
-      @logger.error("NSG Flowlog problem for #{name}, with #{json["records"].size} records and error message #{e.message}")
+      @logger.error("NSG Flowlog problem for #{name} and error message #{e.message}")
     end
     return count 
 end
