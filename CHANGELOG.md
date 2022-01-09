@@ -1,4 +1,9 @@
-#$ 0.12.2
+## 0.12.3
+  - Fixed repetative processing
+  - Replaced newreg with registry cleanup, using newreg to replace old registry worked in 0.11, but not in .12
+  - Implemented Mutex for the save_registry thread. Also marshal @registry before thread start for better thread safety
+
+## 0.12.2
   - Fixed the exception handling, not trying to print how many JSON fields there are while catching the exception
 
 ## 0.12.1

@@ -96,10 +96,6 @@ config :prefix, :validate => :string, :required => false
 
 config :path_filters, :validate => :array, :default => ['**/*'], :required => false
 
-# TODO: Other feature requests
-# show file path in logger
-# add filepath as part of log message
-# option to keep registry on local disk
 
 
 public
@@ -107,6 +103,7 @@ def register
     @pipe_id = Thread.current[:name].split("[").last.split("]").first
     @logger.info("=== #{config_name} #{Gem.loaded_specs["logstash-input-"+config_name].version.to_s} / #{@pipe_id} / #{@id[0,6]} / ruby #{ RUBY_VERSION }p#{ RUBY_PATCHLEVEL } ===")
     @logger.info("If this plugin doesn't work, please raise an issue in https://github.com/janmg/logstash-input-azure_blob_storage")
+    @busy_writing_registry = Mutex.new
     # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
     # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
 end
@@ -152,7 +149,7 @@ def run(queue)
     # read filelist and set offsets to file length to mark all the old files as done
     if registry_create_policy == "start_fresh"
         @registry = list_blobs(true)
-	save_registry(@registry)
+	save_registry()
 	@logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
     end
 
@@ -178,7 +175,6 @@ def run(queue)
         @logger.info("head will be: #{@head} and tail is set to #{@tail}")
     end
 
-    newreg   = Hash.new
     filelist = Hash.new
     worklist = Hash.new
     @last = start = Time.now.to_i
@@ -197,7 +193,6 @@ def run(queue)
         #filelist.sort_by(|k,v|resource(k)[:date])
 	worklist.clear
 	filelist.clear
-        newreg.clear
 
 	# Listing all the files
         filelist = list_blobs(false)
@@ -208,16 +203,24 @@ def run(queue)
             rescue
                 off = 0
             end
-            newreg.store(name, { :offset => off, :length => file[:length] })
+            @registry.store(name, { :offset => off, :length => file[:length] })
 	    if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
 	end
         # size nilClass when the list doesn't grow?!
+
+        # clean registry of files that are not in the filelist
+        @registry.each do |name,file|
+            unless filelist.include?(name)
+                @registry.delete(name)
+                if (@debug_until > @processed) then @logger.info("purging #{name}") end
+            end
+        end
+
         # Worklist is the subset of files where the already read offset is smaller than the file size
-        @registry = newreg
         worklist.clear
         chunk = nil
 
-	worklist = newreg.select {|name,file| file[:offset] < file[:length]}
+	worklist = @registry.select {|name,file| file[:offset] < file[:length]}
 	if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
 
         # Start of processing
@@ -236,7 +239,8 @@ def run(queue)
                         chunk = full_read(name)
                         size=chunk.size
                     rescue Exception => e
-                        @logger.error("Failed to read #{name} because of: #{e.message} .. will continue, set file as read and pretend this never happened")
+                        # Azure::Core::Http::HTTPError / undefined method `message='
+                      @logger.error("Failed to read #{name} ... will continue, set file as read and pretend this never happened")
                         @logger.error("#{size} size and #{file[:length]} file length")
                         size = file[:length]
                     end 
@@ -275,12 +279,12 @@ def run(queue)
                     decorate(event)
                     queue << event
                   end
+                @processed += counter
                 rescue Exception => e
                     @logger.error("codec exception: #{e.message} .. will continue and pretend this never happened")
                     @registry.store(name, { :offset => file[:length], :length => file[:length] })
                     @logger.debug("#{chunk}")
                 end
-                @processed += counter
             end
             @registry.store(name, { :offset => size, :length => file[:length] })
             # TODO add input plugin option to prevent connection cache
@@ -291,14 +295,14 @@ def run(queue)
                 return
             end
 	    if ((Time.now.to_i - @last) > @interval)
-                save_registry(@registry)
+                save_registry()
             end
           end
         end
 	# The files that got processed after the last registry save need to be saved too, in case the worklist is empty for some intervals.
         now = Time.now.to_i
 	if ((now - @last) > @interval)
-            save_registry(@registry)
+            save_registry()
         end
         sleeptime = interval - ((now - start) % interval)
 	if @debug_timer
@@ -309,10 +313,10 @@ def run(queue)
 end
 
 def stop
-    save_registry(@registry)
+    save_registry()
 end
 def close
-    save_registry(@registry)
+    save_registry()
 end
 
 
@@ -490,30 +494,35 @@ def try_list_blobs(fill)
 end
 
 # When events were processed after the last registry save, start a thread to update the registry file.
-def save_registry(filelist)
-    # Because of threading, processed values and regsaved are not thread safe, they can change as instance variable @! Most of the time this is fine because the registry is the last resort, but be careful about corner cases!
+def save_registry()
     unless @processed == @regsaved
-        @regsaved = @processed
-        unless (@busy_writing_registry)
-	Thread.new {
-            begin
-                @busy_writing_registry = true
-                unless (@registry_local_path)
-                    @blob_client.create_block_blob(container, registry_path, Marshal.dump(filelist))
-                    @logger.info("processed #{@processed} events, saving #{filelist.size} blobs and offsets to remote registry #{registry_path}")
-                else
-                    File.open(@registry_local_path+"/"+@pipe_id, 'w') { |file| file.write(Marshal.dump(filelist)) }
-                    @logger.info("processed #{@processed} events, saving #{filelist.size} blobs and offsets to local registry #{registry_local_path+"/"+@pipe_id}")
-                end
-                @busy_writing_registry = false
-                @last = Time.now.to_i
-            rescue
-                @logger.error("Oh my, registry write failed, do you have write access?")
-            end
+      unless (@busy_writing_registry.locked?)
+        # deep_copy hash, to save the registry independant from the variable for thread safety
+        # if deep_clone uses Marshall to do a copy, 
+        regdump = Marshal.dump(@registry)
+        regsize = @registry.size
+        Thread.new {
+        begin
+          @busy_writing_registry.lock
+          unless (@registry_local_path)
+              @blob_client.create_block_blob(container, registry_path, regdump)
+              @logger.info("processed #{@processed} events, saving #{regsize} blobs and offsets to remote registry #{registry_path}")
+          else
+              File.open(@registry_local_path+"/"+@pipe_id, 'w') { |file| file.write(regdump) }
+              @logger.info("processed #{@processed} events, saving #{regsize} blobs and offsets to local registry #{registry_local_path+"/"+@pipe_id}")
+          end
+          @last = Time.now.to_i
+          @regsaved = @processed
+          rescue Exception => e
+              @logger.error("Oh my, registry write failed")
+              @logger.error("#{e.message}")
+          ensure
+              @busy_writing_registry.unlock
+          end
         }
-        else
-            @logger.info("Skipped writing the registry because previous write still in progress, it just takes long or may be hanging!")
-        end
+      else
+        @logger.info("Skipped writing the registry because previous write still in progress, it just takes long or may be hanging!")
+      end
     end
 end
 
