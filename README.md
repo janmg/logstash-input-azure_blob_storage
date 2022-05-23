@@ -8,7 +8,7 @@ For problems or feature requests with this specific plugin, raise a github issue
 This plugin can read from Azure Storage Blobs, for instance JSON diagnostics logs for NSG flow logs or LINE based accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
 
-The plugin depends on the [Ruby library azure-storage-blon](https://rubygems.org/gems/azure-storage-blob/versions/1.1.0) from Microsoft, that depends on Faraday for the HTTPS connection to Azure.
+The plugin depends on the [Ruby library azure-storage-blob](https://rubygems.org/gems/azure-storage-blob/versions/1.1.0) from Microsoft, that depends on Faraday for the HTTPS connection to Azure.
 
 The plugin executes the following steps
 1. Lists all the files in the azure storage account. where the path of the files are matching pathprefix
