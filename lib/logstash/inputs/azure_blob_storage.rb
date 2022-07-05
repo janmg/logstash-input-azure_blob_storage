@@ -149,8 +149,8 @@ def run(queue)
     # read filelist and set offsets to file length to mark all the old files as done
     if registry_create_policy == "start_fresh"
         @registry = list_blobs(true)
-	save_registry()
-	@logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
+        save_registry()
+        @logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
     end
 
     @is_json = false
@@ -191,10 +191,10 @@ def run(queue)
         # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
         # TODO: sort by timestamp ?
         #filelist.sort_by(|k,v|resource(k)[:date])
-	worklist.clear
-	filelist.clear
+        worklist.clear
+        filelist.clear
 
-	# Listing all the files
+        # Listing all the files
         filelist = list_blobs(false)
         filelist.each do |name, file|
             off = 0
@@ -204,8 +204,8 @@ def run(queue)
                 off = 0
             end
             @registry.store(name, { :offset => off, :length => file[:length] })
-	    if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
-	end
+            if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
+        end
         # size nilClass when the list doesn't grow?!
 
         # clean registry of files that are not in the filelist
@@ -220,11 +220,11 @@ def run(queue)
         worklist.clear
         chunk = nil
 
-	worklist = @registry.select {|name,file| file[:offset] < file[:length]}
-	if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
+        worklist = @registry.select {|name,file| file[:offset] < file[:length]}
+        if (worklist.size > 4) then @logger.info("worklist contains #{worklist.size} blobs") end
 
         # Start of processing
-	# This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
+        # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
         if (worklist.size > 0) then
           worklist.each do |name, file|
             start = Time.now.to_i
@@ -257,7 +257,7 @@ def run(queue)
               unless chunk.nil?
                 res = resource(name)
                 begin
-		    fingjson = JSON.parse(chunk)
+                    fingjson = JSON.parse(chunk)
                     @processed += nsgflowlog(queue, fingjson, name)
                     @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
                 rescue JSON::ParserError
@@ -289,23 +289,23 @@ def run(queue)
             @registry.store(name, { :offset => size, :length => file[:length] })
             # TODO add input plugin option to prevent connection cache
             @blob_client.client.reset_agents!
-	    #@logger.info("name #{name} size #{size} len #{file[:length]}")
+            #@logger.info("name #{name} size #{size} len #{file[:length]}")
             # if stop? good moment to stop what we're doing
             if stop?
                 return
             end
-	    if ((Time.now.to_i - @last) > @interval)
+            if ((Time.now.to_i - @last) > @interval)
                 save_registry()
             end
           end
         end
-	# The files that got processed after the last registry save need to be saved too, in case the worklist is empty for some intervals.
+        # The files that got processed after the last registry save need to be saved too, in case the worklist is empty for some intervals.
         now = Time.now.to_i
-	if ((now - @last) > @interval)
+        if ((now - @last) > @interval)
             save_registry()
         end
         sleeptime = interval - ((now - start) % interval)
-	if @debug_timer
+        if @debug_timer
             @logger.info("going to sleep for #{sleeptime} seconds")
         end
         Stud.stoppable_sleep(sleeptime) { stop? }
@@ -484,7 +484,7 @@ def try_list_blobs(fill)
          end
          nextMarker = blobs.continuation_token
          break unless nextMarker && !nextMarker.empty?
-	 if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
+         if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
          counter+=1
         end
         if @debug_timer
