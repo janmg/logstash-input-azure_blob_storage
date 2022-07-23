@@ -1,15 +1,24 @@
 version: 2.1
-orbs:
-  ruby: circleci/ruby@0.1.2 
 
 jobs:
   build:
     docker:
-      - image: circleci/ruby:2.6.3-stretch-node
-    executor: ruby/default
+      - image: docker.elastic.co/logstash/logstash-oss:8.3.2
     steps:
       - checkout
+#      - run:
+#          name: run test rspec
+#          command: /usr/share/logstash/bin/ruby -S gem install rspec && /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/bundler-2.3.17/exe/bundle install && /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/bundler-2.3.17/exe/bundle exec rspec /usr/share/logstash/project/spec/inputs/azure_blob_storage_spec.rb
       - run:
-          name: Which bundler?
-          command: bundle -v
-      - ruby/bundle-install
+          name: build plugin
+          command: /usr/share/logstash/bin/ruby -S gem build /usr/share/logstash/project/logstash-input-azure_blob_storage.gemspec
+      - run:
+          name: install plugin
+          command: /usr/share/logstash/bin/logstash-plugin install /usr/share/logstash/project/logstash-input-azure_blob_storage-$(grep version /usr/share/logstash/project/logstash-input-azure_blob_storage.gemspec | cut -d"'" -f 2).gem
+#      - run:
+#          name: test logstash
+#          command: /usr/share/logstash/bin/logstash -f /usr/share/logstash/project/nsg-pipe.conf
+          #command: /usr/share/logstash/bin/logstash -e "input { azure_blob_storage { storageaccount => "logstashplugingtest", access_key => "Ba5e64c0d3==", container => "insights-logs-networksecuritygroupflowevent" } }" -e "output { stdout { codec => rubydebug } }"
+      - store_artifacts:
+          path: /usr/share/logstash/project/logstash-input-azure_blob_storage-$(grep version /usr/share/logstash/project/logstash-input-azure_blob_storage.gemspec | cut -d"'" -f 2).gem
+          destination: logstash-input-azure_blob_storage-$(grep version /usr/share/logstash/project/logstash-input-azure_blob_storage.gemspec | cut -d"'" -f 2).gem
