@@ -3,7 +3,7 @@
 puts @registry
 puts
 @registry.each do |name, file|
-  puts name
-  puts "offset: #{file[:offset]}"
-  puts "length: #{file[:length]}"
+    puts name
+    puts "offset: #{file[:offset]}"
+    puts "length: #{file[:length]}"
 end

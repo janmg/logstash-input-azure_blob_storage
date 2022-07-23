@@ -1,0 +1,21 @@
+AllCops:
+  DisabledByDefault: true
+
+Layout/IndentationConsistency:
+  Enabled: true
+
+Layout/IndentationWidth:
+  Enabled: true
+  Width: 4
+
+Layout/CommentIndentation:
+  Enabled: true
+
+Layout/RescueEnsureAlignment:
+  Enabled: true
+
+Layout/BeginEndAlignment:
+  Enabled: true
+
+Layout/BlockAlignment:
+  Enabled: true
