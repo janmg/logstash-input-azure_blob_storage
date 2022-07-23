@@ -12,7 +12,7 @@ EOF
     s.require_paths = ['lib']
 
     # Files
-    s.files = Dir['lib/**/*','spec/**/*','vendor/**/*','*.gemspec','*.md','CONTRIBUTORS','Gemfile','LICENSE','NOTICE.TXT']
+    s.files = Dir['lib/**/*','spec/**/*','vendor/**/*','*.gemspec','*.md','CONTRIBUTORS','Gemfile','LICENSE']
     # Tests
     s.test_files = s.files.grep(%r{^(test|spec|features)/})
 
@@ -23,6 +23,7 @@ EOF
     s.add_runtime_dependency 'logstash-core-plugin-api', '~> 2.0'
     s.add_runtime_dependency 'stud', '~> 0.0.23'
     s.add_runtime_dependency 'azure-storage-blob', '~> 2', '>= 2.0.3'
+
     s.add_development_dependency 'logstash-devutils'
     s.add_development_dependency 'rubocop'
 end
