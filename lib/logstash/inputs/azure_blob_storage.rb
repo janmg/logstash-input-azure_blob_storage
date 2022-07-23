@@ -1,15 +1,30 @@
 # encoding: utf-8
 require 'logstash/inputs/base'
+#require 'logstash/namespace'
 require 'stud/interval'
 require 'azure/storage/blob'
 require 'json'
 
-# This is a logstash input plugin for files in Azure Blob Storage. There is a storage explorer in the portal and an application with the same name https://storageexplorer.com. A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files). Blobs have one or more blocks. After writing the blocks, they can be committed. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
-# https://azure.microsoft.com/en-us/services/storage/blobs/
+# This is a logstash input plugin for files in Azure Storage Accounts. There is a storage explorer in the portal and an application with the same name https://storageexplorer.com.
+
+# https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blobs-introduction
+# The hierarchy of an Azure block storage is
+# Tenant > Subscription > Account > ResourceGroup > StorageAccount > Container > FileBlobs > Blocks
+# A storage account can store blobs, file shares, queus and tables. This plugin is using the Azure ruby plugin to fetch blobs and process the data in the blocks and dealt with blobs growing over time and ignoring archive blobs
+# 
+# block-id                          bytes content
+# A00000000000000000000000000000000 12    {"records":[
+# D672f4bbd95a04209b00dc05d899e3cce 2576  json objects for 1st minute
+# D7fe0d4f275a84c32982795b0e5c7d3a1 2312  json objects for 2nd minute
+# Z00000000000000000000000000000000 2     ]}
+
+# A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files). Blobs have one or more blocks. After writing the blocks, they can be committed. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
+
+
 class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     config_name "azure_blob_storage"
 
-    # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json"  and the for WADIIS and APPSERVICE is "line".
+    # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json" and the for WADIIS and APPSERVICE is "line".
     default :codec, "json"
 
     # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue. 
@@ -22,12 +37,6 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # The storage account name for the azure storage account.
     config :storageaccount, :validate => :string, :required => false
 
-    # DNS Suffix other then blob.core.windows.net
-    config :dns_suffix, :validate => :string, :required => false, :default => 'core.windows.net'
-
-    # For development this can be used to emulate an accountstorage when not available from azure
-    #config :use_development_storage, :validate => :boolean, :required => false
-
     # The (primary or secondary) Access Key for the the storage account. The key can be found in the portal.azure.com or through the azure api StorageAccounts/ListKeys. For example the PowerShell command Get-AzStorageAccountKey.
     config :access_key, :validate => :password, :required => false
 
@@ -37,6 +46,13 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # The container of the blobs.
     config :container, :validate => :string, :default => 'insights-logs-networksecuritygroupflowevent'
 
+    # DNS Suffix other then blob.core.windows.net, needed for government cloud.
+    config :dns_suffix, :validate => :string, :required => false, :default => 'core.windows.net'
+
+    # For development this can be used to emulate an accountstorage when not available from azure
+    #config :use_development_storage, :validate => :boolean, :required => false
+
+    # The registry keeps track of the files that where already procesed.
     # The registry file keeps track of the files that have been processed and until which offset in bytes. It's similar in function
     #
     # The default, `data/registry`, it contains a Ruby Marshal Serialized Hash of the filename the offset read sofar and the filelength the list time a filelisting was done.
@@ -49,25 +65,19 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # When set to `start_over`, all log files are processed from begining.
     # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
     config :registry_create_policy, :validate => ['resume','start_over','start_fresh'], :required => false, :default => 'resume'
-
-    # The registry keeps track of the files that where already procesed. The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substraciting the registry of already processed files to determine the worklist.
-    #
+	
+	# The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
     # waiting time in seconds until processing the next batch. NSGFLOWLOGS append a block per minute, so use multiples of 60 seconds, 300 for 5 minutes, 600 for 10 minutes. The registry is also saved after every interval.
     # Partial reading starts from the offset and reads until the end, so the starting tag is prepended 
-    #
-    # A00000000000000000000000000000000 12    {"records":[
-    # D672f4bbd95a04209b00dc05d899e3cce 2576  json objects for 1st minute
-    # D7fe0d4f275a84c32982795b0e5c7d3a1 2312  json objects for 2nd minute
-    # Z00000000000000000000000000000000 2     ]}
     config :interval, :validate => :number, :default => 60
 
-    # add the filename into the events
+    # add the filename as a field into the events
     config :addfilename, :validate => :boolean, :default => false, :required => false
 
-    # debug_until will for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. This is a lightweight alternative to switching the loglevel from info to debug or even trace 
+    # debug_until will at the creation of the pipeline for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. After a number of events, the plugin will stop logging the events and continue silently. This is a lightweight alternative to switching the loglevel from info to debug or even trace to see what the plugin is doing and how fast at the start of the plugin. A good value would be approximately 3x the amount of events per file. For instance 6000 events.
     config :debug_until, :validate => :number, :default => 0, :required => false
 
-    # debug_timer show time spent on activities
+    # debug_timer show in the logs, the time spent on activities
     config :debug_timer, :validate => :boolean, :default => false, :required => false
 
     # WAD IIS Grok Pattern
@@ -81,19 +91,14 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # The string that ends the JSON
     config :file_tail, :validate => :string, :required => false, :default => ']}'
 
-    # The path(s) to the file(s) to use as an input. By default it will
-    # watch every files in the storage container.
-    # You can use filename patterns here, such as `logs/*.log`.
-    # If you use a pattern like `logs/**/*.log`, a recursive search
-    # of `logs` will be done for all `*.log` files.
-    # Do not include a leading `/`, as Azure path look like this:
-    # `path/to/blob/file.txt`
-    #
-    # You may also configure multiple paths. See an example
-    # on the <<array,Logstash configuration page>>.
-    # For NSGFLOWLOGS a path starts with "resourceId=/", but this would only be needed to exclude other files that may be written in the same container.
+    # By default it will watch every file in the storage container. The prefix option is a simple filter that only processes files with a path that starts with that value.
+    # For NSGFLOWLOGS a path starts with "resourceId=/". This would only be needed to exclude other paths that may be written in the same container. The registry file will be excluded.
+    # You may also configure multiple paths. See an example on the <<array,Logstash configuration page>>.
+    # Do not include a leading `/`, as Azure path look like this: `path/to/blob/file.txt`
     config :prefix, :validate => :string, :required => false
 
+    # For filtering on filenames, you can use filename patterns, such as `logs/*.log`. If you use a pattern like `logs/**/*.log`, a recursive search of `logs` will be done for all `*.log` files in the logs directory.
+    # For https://www.rubydoc.info/stdlib/core/File.fnmatch
     config :path_filters, :validate => :array, :default => ['**/*'], :required => false
 
 
@@ -105,7 +110,6 @@ public
         @logger.info("If this plugin doesn't work, please raise an issue in https://github.com/janmg/logstash-input-azure_blob_storage")
         @busy_writing_registry = Mutex.new
         # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
-        # TODO: Implement retry ... Error: Connection refused - Failed to open TCP connection to
     end
 
 
@@ -340,15 +344,15 @@ private
         unless conn.nil?
             @blob_client = Azure::Storage::Blob::BlobService.create_from_connection_string(conn)
         else
-            #        unless use_development_storage?
+            # unless use_development_storage?
             @blob_client = Azure::Storage::Blob::BlobService.create(
                 storage_account_name: storageaccount,
                 storage_dns_suffix: dns_suffix,
                 storage_access_key: access_key.value,
             )
-            #        else
-            #            @logger.info("not yet implemented")
-            #        end
+            # else
+            #     @logger.info("development storage emulator not yet implemented")
+            # end
         end
     end
 
