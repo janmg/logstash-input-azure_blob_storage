@@ -291,8 +291,7 @@ public
                         end
                     end
                     @registry.store(name, { :offset => size, :length => file[:length] })
-                    # TODO add input plugin option to prevent connection cache
-                    @blob_client.client.reset_agents!
+                    
                     #@logger.info("name #{name} size #{size} len #{file[:length]}")
                     # if stop? good moment to stop what we're doing
                     if stop?
