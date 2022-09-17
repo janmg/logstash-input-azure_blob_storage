@@ -204,8 +204,8 @@ public
                 off = 0
                 begin
                     off = @registry[name][:offset]
-                rescue
-                    off = 0
+                rescue Exception => e
+                    @logger.error("caught: #{e.message} while reading #{name}")
                 end
                 @registry.store(name, { :offset => off, :length => file[:length] })
                 if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
