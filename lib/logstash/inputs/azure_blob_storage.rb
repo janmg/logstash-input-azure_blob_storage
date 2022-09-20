@@ -241,21 +241,25 @@ public
                         if (file[:length] > 0)
                             begin
                                 chunk = full_read(name)
-                                size=chunk.size
+                                delta_size = chunk.size
                             rescue Exception => e
                                 # Azure::Core::Http::HTTPError / undefined method `message='
                                 @logger.error("Failed to read #{name} ... will continue, set file as read and pretend this never happened")
                                 @logger.error("#{size} size and #{file[:length]} file length")
-                                size = file[:length]
-                            end 
+                                chunk = nil
+                                delta_size = file[:length]
+                            end
                         else
                             @logger.info("found a zero size file #{name}")
-                            chunk = nil 
+                            chunk = nil
+                            delta_size = 0
                         end
                     else
                         chunk = partial_read_json(name, file[:offset], file[:length])
+                        delta_size = chunk.size
                         @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:length]}")
                     end
+
                     if logtype == "nsgflowlog" && @is_json
                         # skip empty chunks
                         unless chunk.nil?
@@ -286,12 +290,14 @@ public
                             @processed += counter
                         rescue Exception => e
                             @logger.error("codec exception: #{e.message} .. will continue and pretend this never happened")
-                            @registry.store(name, { :offset => file[:length], :length => file[:length] })
                             @logger.debug("#{chunk}")
                         end
                     end
+
+                    # Update the size
+                    size = file[:offset] + delta_size
                     @registry.store(name, { :offset => size, :length => file[:length] })
-                    
+
                     #@logger.info("name #{name} size #{size} len #{file[:length]}")
                     # if stop? good moment to stop what we're doing
                     if stop?
