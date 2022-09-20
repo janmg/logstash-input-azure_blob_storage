@@ -11,7 +11,7 @@ require 'json'
 # The hierarchy of an Azure block storage is
 # Tenant > Subscription > Account > ResourceGroup > StorageAccount > Container > FileBlobs > Blocks
 # A storage account can store blobs, file shares, queus and tables. This plugin is using the Azure ruby plugin to fetch blobs and process the data in the blocks and dealt with blobs growing over time and ignoring archive blobs
-# 
+#
 # block-id                          bytes content
 # A00000000000000000000000000000000 12    {"records":[
 # D672f4bbd95a04209b00dc05d899e3cce 2576  json objects for 1st minute
@@ -27,7 +27,7 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json" and the for WADIIS and APPSERVICE is "line".
     default :codec, "json"
 
-    # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue. 
+    # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue.
     config :logtype, :validate => ['nsgflowlog','wadiis','appservice','raw'], :default => 'raw'
 
     # The storage account is accessed through Azure::Storage::Blob::BlobService, it needs either a sas_token, connection string or a storageaccount/access_key pair.
@@ -58,17 +58,17 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # The default, `data/registry`, it contains a Ruby Marshal Serialized Hash of the filename the offset read sofar and the filelength the list time a filelisting was done.
     config :registry_path, :validate => :string, :required => false, :default => 'data/registry.dat'
 
-    # If registry_local_path is set to a directory on the local server, the registry is save there instead of the remote blob_storage 
+    # If registry_local_path is set to a directory on the local server, the registry is save there instead of the remote blob_storage
     config :registry_local_path, :validate => :string, :required => false
 
     # The default, `resume`, will load the registry offsets and will start processing files from the offsets.
     # When set to `start_over`, all log files are processed from begining.
     # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
     config :registry_create_policy, :validate => ['resume','start_over','start_fresh'], :required => false, :default => 'resume'
-	
+
 	# The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
     # waiting time in seconds until processing the next batch. NSGFLOWLOGS append a block per minute, so use multiples of 60 seconds, 300 for 5 minutes, 600 for 10 minutes. The registry is also saved after every interval.
-    # Partial reading starts from the offset and reads until the end, so the starting tag is prepended 
+    # Partial reading starts from the offset and reads until the end, so the starting tag is prepended
     config :interval, :validate => :number, :default => 60
 
     # add the filename as a field into the events
@@ -192,7 +192,7 @@ public
         # 6. if there is time left, sleep to complete the interval. If processing takes more than an inteval, save the registry and continue.
         # 7. If stop signal comes, finish the current file, save the registry and quit
         while !stop?
-            # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop, 
+            # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop,
             # TODO: sort by timestamp ?
             #filelist.sort_by(|k,v|resource(k)[:date])
             worklist.clear
@@ -429,7 +429,7 @@ private
         rescue Exception => e
             @logger.error("NSG Flowlog problem for #{name} and error message #{e.message}")
         end
-        return count 
+        return count
     end
 
     def wadiislog(lines)
@@ -501,7 +501,7 @@ private
         unless @processed == @regsaved
             unless (@busy_writing_registry.locked?)
                 # deep_copy hash, to save the registry independant from the variable for thread safety
-                # if deep_clone uses Marshall to do a copy, 
+                # if deep_clone uses Marshall to do a copy,
                 regdump = Marshal.dump(@registry)
                 regsize = @registry.size
                 Thread.new {
