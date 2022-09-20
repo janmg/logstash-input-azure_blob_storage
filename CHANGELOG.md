@@ -1,4 +1,5 @@
 ## 0.12.4
+  - Connection Cache reset removed, since agents are cached per host
   - Explicit handling of json_lines and respecting line boundaries (thanks nttoshev)
   - Removed reprocessing on any exception
 
