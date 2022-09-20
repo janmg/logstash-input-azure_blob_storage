@@ -1,3 +1,7 @@
+## 0.12.4
+  - Explicit handling of json_lines and respecting line boundaries (thanks nttoshev)
+  - Removed reprocessing on any exception
+
 ## 0.12.3
   - Fixed repetative processing
   - Replaced newreg with registry cleanup, using newreg to replace old registry worked in 0.11, but not in .12
