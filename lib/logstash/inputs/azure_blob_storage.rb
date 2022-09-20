@@ -158,9 +158,12 @@ public
         end
 
         @is_json = false
+        @is_json_line = false
         begin
             if @codec.class.name.eql?("LogStash::Codecs::JSON")
-                @is_json = true 
+                @is_json = true
+            elsif @codec.class.name.eql?("LogStash::Codecs::JSONLines")
+                @is_json_line = true
             end
         end
         @head = ''
@@ -277,6 +280,18 @@ public
                     elsif logtype == "wadiis" && !@is_json
                         @processed += wadiislog(queue, name)
                     else
+                        # Handle JSONLines format
+                        if !@chunk.nil? && @is_json_line
+                            newline_rindex = chunk.rindex("\n")
+                            if newline_rindex.nil?
+                                # No full line in chunk, skip it without updating the registry.
+                                # Expecting that the JSON line would be filled in at a subsequent iteration.
+                                next
+                            end
+                            chunk = chunk[0..newline_rindex]
+                            delta_size = chunk.size
+                        end
+
                         counter = 0
                         begin
                             @codec.decode(chunk) do |event|
