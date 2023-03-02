@@ -272,7 +272,8 @@ public
                                 @processed += nsgflowlog(queue, fingjson, name)
                                 @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
                             rescue JSON::ParserError
-                                @logger.error("parse error on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
+                                @logger.error("parse error #{e.message} on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
+                                @logger.debug("#{chunk}")
                             end
                         end
                     # TODO: Convert this to line based grokking.

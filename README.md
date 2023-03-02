@@ -207,7 +207,7 @@ filter {
     remove_field => ["subresponse"]
     remove_field => ["username"]
     remove_field => ["clientPort"]
-    remove_field => ["port"]:0
+    remove_field => ["port"]
     remove_field => ["timestamp"]
   }
 }
