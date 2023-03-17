@@ -1,3 +1,13 @@
+## PROBABLY 0.12.4 is the most stable version until I sort out when and why JSON Parse errors happen
+Join the discussion if you have something to share!
+https://github.com/janmg/logstash-input-azure_blob_storage/issues/34
+
+
+## 0.12.6
+  - Fixed the 0.12.5 exception handling, it actually caused a warning to become a fatal pipeline crashing error
+  - The chuck that failed to process should be printed in debug mode, for testing use debug_until => 10000 
+  - Now check if registry entry exist before loading the offsets, to avoid caught: undefined method `[]' for nil:NilClass
+
 ## 0.12.5
   - Added exception message on json parse errors
 

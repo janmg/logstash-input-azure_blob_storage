@@ -205,10 +205,12 @@ public
             filelist = list_blobs(false)
             filelist.each do |name, file|
                 off = 0
-                begin
+                if @registry.key?(name) then
+                  begin
                     off = @registry[name][:offset]
-                rescue Exception => e
+                  rescue Exception => e
                     @logger.error("caught: #{e.message} while reading #{name}")
+                  end
                 end
                 @registry.store(name, { :offset => off, :length => file[:length] })
                 if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
@@ -271,9 +273,9 @@ public
                                 fingjson = JSON.parse(chunk)
                                 @processed += nsgflowlog(queue, fingjson, name)
                                 @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
-                            rescue JSON::ParserError
+                            rescue JSON::ParserError => e
                                 @logger.error("parse error #{e.message} on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
-                                @logger.debug("#{chunk}")
+                                if (@debug_until > @processed) then @logger.info("#{chunk}") end
                             end
                         end
                     # TODO: Convert this to line based grokking.
@@ -573,7 +575,7 @@ private
                             @logger.debug("learned tail: #{@tail}")
                         end
                     rescue Exception => e
-                        @logger.info("learn json one of the attempts failed #{e.message}")
+                        @logger.info("learn json one of the attempts failed")
                     end
                 end
             end
