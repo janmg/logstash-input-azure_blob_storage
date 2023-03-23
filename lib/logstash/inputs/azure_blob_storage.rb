@@ -463,9 +463,6 @@ private
                             if @addfilename
                                 ev.merge!( {:filename => name } )
                             end
-                            if @addall
-                                ev.merge!( {:systemId =>tups[8], macAddress, category, time, operationName
-                            end
                             event = LogStash::Event.new('message' => ev.to_json)
                             decorate(event)
                             queue << event
