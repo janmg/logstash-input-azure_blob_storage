@@ -2,6 +2,10 @@
 Join the discussion if you have something to share!
 https://github.com/janmg/logstash-input-azure_blob_storage/issues/34
 
+## 0.12.7
+  - rewrote partial_read, now the occasional json parse errors should be fixed by reading only commited blocks.
+  - used the new header and tail block name, should now learn header and footer automatically again
+  - added addall to the configurations to add systemId, macAddress, category, time, operationName to the output
 
 ## 0.12.6
   - Fixed the 0.12.5 exception handling, it actually caused a warning to become a fatal pipeline crashing error

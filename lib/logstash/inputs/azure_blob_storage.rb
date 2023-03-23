@@ -17,9 +17,11 @@ require 'json'
 # D672f4bbd95a04209b00dc05d899e3cce 2576  json objects for 1st minute
 # D7fe0d4f275a84c32982795b0e5c7d3a1 2312  json objects for 2nd minute
 # Z00000000000000000000000000000000 2     ]}
-
+#
+# The azure-storage-ruby connects to the storageaccount and the files are read through get_blob. For partial read the options with start and end ar used. 
+# https://github.com/Azure/azure-storage-ruby/blob/master/blob/lib/azure/storage/blob/blob.rb#L89
+#
 # A storage account has by default a globally unique name, {storageaccount}.blob.core.windows.net which is a CNAME to  Azures blob servers blob.*.store.core.windows.net. A storageaccount has an container and those have a directory and blobs (like files). Blobs have one or more blocks. After writing the blocks, they can be committed. Some Azure diagnostics can send events to an EventHub that can be parse through the plugin logstash-input-azure_event_hubs, but for the events that are only stored in an storage account, use this plugin. The original logstash-input-azureblob from azure-diagnostics-tools is great for low volumes, but it suffers from outdated client, slow reads, lease locking issues and json parse errors.
-
 
 class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     config_name "azure_blob_storage"
@@ -73,6 +75,9 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
 
     # add the filename as a field into the events
     config :addfilename, :validate => :boolean, :default => false, :required => false
+
+    # add all resource details
+    config :addall, :validate => :boolean, :default => false, :required => false
 
     # debug_until will at the creation of the pipeline for a maximum amount of processed messages shows 3 types of log printouts including processed filenames. After a number of events, the plugin will stop logging the events and continue silently. This is a lightweight alternative to switching the loglevel from info to debug or even trace to see what the plugin is doing and how fast at the start of the plugin. A good value would be approximately 3x the amount of events per file. For instance 6000 events.
     config :debug_until, :validate => :number, :default => 0, :required => false
@@ -260,9 +265,10 @@ public
                             delta_size = 0
                         end
                     else
-                        chunk = partial_read_json(name, file[:offset], file[:length])
+                        chunk = partial_read(name, file[:offset])
+                        # chunk = partial_read_json(name, file[:offset], file[:length])
                         delta_size = chunk.size
-                        @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:length]}")
+                        @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:offset]+chunk.size} with filesize #{file[:length]}")
                     end
 
                     if logtype == "nsgflowlog" && @is_json
@@ -398,14 +404,29 @@ private
         return chuck
     end
 
-    def partial_read_json(filename, offset, length)
-        content = @blob_client.get_blob(container, filename, start_range: offset-@tail.length, end_range: length-1)[1]
-        if content.end_with?(@tail)
-            # the tail is part of the last block, so included in the total length of the get_blob
-            return @head + strip_comma(content)
+    def partial_read(blobname, offset)
+        # 1. read committed blocks, calculate length
+        # 2. calculate the offset to read
+        # 3. strip comma
+        # if json strip comma and fix head and tail
+        size = 0
+        blocks = @blob_client.list_blob_blocks(container, blobname)
+        blocks[:committed].each do |block|
+            size += block.size
+        end
+        # read the new blob blocks from the offset to the last committed size.
+        # if it is json, fix the head and tail
+        # crap committed block at the end is the tail, so must be substracted from the read and then comma stripped and tail added.
+        # but why did I need a -1 for the length??
+        if @is_json
+            content = @blob_client.get_blob(container, blobname, start_range: offset-@tail.length, end_range: size-@tail.length-1)[1]
+            if content.end_with?(@tail)
+                return @head + strip_comma(content)
+            else
+                return @head + strip_comma(content[0...-@tail.length]) + @tail
+            end
         else
-            # when the file has grown between list_blobs and the time of partial reading, the tail will be wrong
-            return @head + strip_comma(content[0...-@tail.length]) + @tail
+            content = @blob_client.get_blob(container, blobname, start_range: offset, end_range: size-1)[1]
         end
     end
 
@@ -441,6 +462,9 @@ private
                             @logger.trace(ev.to_s)
                             if @addfilename
                                 ev.merge!( {:filename => name } )
+                            end
+                            if @addall
+                                ev.merge!( {:systemId =>tups[8], macAddress, category, time, operationName
                             end
                             event = LogStash::Event.new('message' => ev.to_json)
                             decorate(event)
@@ -563,11 +587,11 @@ private
                 unless blob.name == registry_path
                     begin
                         blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
-                        if blocks.first.name.start_with?('A00')
+                        if ['A00000000000000000000000000000000','QTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw'].include?(blocks.first.name)
                             @logger.debug("using #{blob.name}/#{blocks.first.name} to learn the json header")
                             @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
                         end
-                        if blocks.last.name.start_with?('Z00')
+                        if ['Z00000000000000000000000000000000','WjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw'].include?(blocks.last.name)
                             @logger.debug("using #{blob.name}/#{blocks.last.name} to learn the json footer")
                             length = blob.properties[:content_length].to_i
                             offset = length - blocks.last.size
@@ -590,7 +614,11 @@ private
         unless temp[9].nil?
             date = val(temp[9])+'/'+val(temp[10])+'/'+val(temp[11])+'-'+val(temp[12])+':00'
         end
-        return {:subscription=> temp[2], :resourcegroup=>temp[4], :nsg=>temp[8], :date=>date}
+        if @addall
+            return {:systemid=> temp[1], :subscription=> temp[2], :mac=> temp[3], :resourcegroup=>temp[4], :category=>temp[5], :time=>temp[6], :operationname=>temp[7], :nsg=>temp[8], :date=>date}
+        else
+            return {:subscription=> temp[2], :resourcegroup=>temp[4], :nsg=>temp[8], :date=>date}
+        end
     end
 
     def val(str)
