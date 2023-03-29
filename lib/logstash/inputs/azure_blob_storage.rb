@@ -266,9 +266,7 @@ public
                         end
                     else
                         chunk = partial_read(name, file[:offset])
-                        # chunk = partial_read_json(name, file[:offset], file[:length])
-                        delta_size = chunk.size
-                        @logger.debug("partial file #{name} from #{file[:offset]} to #{file[:offset]+chunk.size} with filesize #{file[:length]}")
+                        delta_size = chunk.size - @head.length - 1
                     end
 
                     if logtype == "nsgflowlog" && @is_json
@@ -278,9 +276,9 @@ public
                             begin
                                 fingjson = JSON.parse(chunk)
                                 @processed += nsgflowlog(queue, fingjson, name)
-                                @logger.debug("Processed #{res[:nsg]} [#{res[:date]}] #{@processed} events")
+                                @logger.debug("Processed #{res[:nsg]} #{@processed} events")
                             rescue JSON::ParserError => e
-                                @logger.error("parse error #{e.message} on #{res[:nsg]} [#{res[:date]}] offset: #{file[:offset]} length: #{file[:length]}")
+                                @logger.error("parse error #{e.message} on #{res[:nsg]} offset: #{file[:offset]} length: #{file[:length]}")
                                 if (@debug_until > @processed) then @logger.info("#{chunk}") end
                             end
                         end
@@ -423,11 +421,11 @@ private
         # should read the full content and then substract json tail
 
         if @is_json
-            content = @blob_client.get_blob(container, blobname, start_range: offset-@tail.length, end_range: size-@tail.length-1)[1]
+            content = @blob_client.get_blob(container, blobname, start_range: offset-1, end_range: size-1)[1]
             if content.end_with?(@tail)
                 return @head + strip_comma(content)
             else
-                @logger.info("Unexpectedly there is no tail, this means that new committed blocks started appearing!")
+                @logger.info("Fixed a tail! probably new committed blocks started appearing!")
                 # substract the length of the tail and add the tail, because the file grew.size was calculated as the block boundary, so replacing the last bytes with the tail should fix the problem 
                 return @head + strip_comma(content[0...-@tail.length]) + @tail
             end
@@ -451,6 +449,7 @@ private
             json["records"].each do |record|
                 resource = resource(record["resourceId"])
                 # resource = { :subscription => res[:subscription], :resourcegroup => res[:resourcegroup], :nsg => res[:nsg] }
+                extras = { :time => record["time"], :system => record["systemId"], :mac => record["macAddress"], :category => record["category"], :operation => record["operationName"] }
                 @logger.trace(resource.to_s)
                 record["properties"]["flows"].each do |flows|
                     rule = resource.merge ({ :rule => flows["rule"]})
@@ -469,6 +468,11 @@ private
                             if @addfilename
                                 ev.merge!( {:filename => name } )
                             end
+                            if @addall
+                                ev.merge!( extras )
+                            end
+
+                            # Add event to logstash queue
                             event = LogStash::Event.new('message' => ev.to_json)
                             decorate(event)
                             queue << event
@@ -613,15 +617,11 @@ private
 
     def resource(str)
         temp = str.split('/')
-        date = '---'
-        unless temp[9].nil?
-            date = val(temp[9])+'/'+val(temp[10])+'/'+val(temp[11])+'-'+val(temp[12])+':00'
-        end
-        if @addall
-            return {:systemid=> temp[1], :subscription=> temp[2], :mac=> temp[3], :resourcegroup=>temp[4], :category=>temp[5], :time=>temp[6], :operationname=>temp[7], :nsg=>temp[8], :date=>date}
-        else
-            return {:subscription=> temp[2], :resourcegroup=>temp[4], :nsg=>temp[8], :date=>date}
-        end
+        #date = '---'
+        #unless temp[9].nil?
+        #    date = val(temp[9])+'/'+val(temp[10])+'/'+val(temp[11])+'-'+val(temp[12])+':00'
+        #end
+        return {:subscription=> temp[2], :resourcegroup=>temp[4], :nsg=>temp[8]}
     end
 
     def val(str)
