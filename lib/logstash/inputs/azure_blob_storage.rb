@@ -417,12 +417,18 @@ private
         # read the new blob blocks from the offset to the last committed size.
         # if it is json, fix the head and tail
         # crap committed block at the end is the tail, so must be substracted from the read and then comma stripped and tail added.
-        # but why did I need a -1 for the length??
+        # but why did I need a -1 for the length?? probably the offset starts at 0 and ends at size-1
+
+        # should first check commit, read and the check committed again? no, only read the commited size
+        # should read the full content and then substract json tail
+
         if @is_json
             content = @blob_client.get_blob(container, blobname, start_range: offset-@tail.length, end_range: size-@tail.length-1)[1]
             if content.end_with?(@tail)
                 return @head + strip_comma(content)
             else
+                @logger.info("Unexpectedly there is no tail, this means that new committed blocks started appearing!")
+                # substract the length of the tail and add the tail, because the file grew.size was calculated as the block boundary, so replacing the last bytes with the tail should fix the problem 
                 return @head + strip_comma(content[0...-@tail.length]) + @tail
             end
         else
@@ -443,8 +449,8 @@ private
         count=0
         begin
             json["records"].each do |record|
-                res = resource(record["resourceId"])
-                resource = { :subscription => res[:subscription], :resourcegroup => res[:resourcegroup], :nsg => res[:nsg] }
+                resource = resource(record["resourceId"])
+                # resource = { :subscription => res[:subscription], :resourcegroup => res[:resourcegroup], :nsg => res[:nsg] }
                 @logger.trace(resource.to_s)
                 record["properties"]["flows"].each do |flows|
                     rule = resource.merge ({ :rule => flows["rule"]})
