@@ -76,6 +76,9 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # add the filename as a field into the events
     config :addfilename, :validate => :boolean, :default => false, :required => false
 
+    # add environment
+    config :environment, :validate => :string, :required => false
+
     # add all resource details
     config :addall, :validate => :boolean, :default => false, :required => false
 
@@ -283,7 +286,6 @@ public
                             end
                         end
                     # TODO: Convert this to line based grokking.
-                    # TODO: ECS Compliance?
                     elsif logtype == "wadiis" && !@is_json
                         @processed += wadiislog(queue, name)
                     else
@@ -468,12 +470,18 @@ private
                             if @addfilename
                                 ev.merge!( {:filename => name } )
                             end
+                            unless @environment.nil?
+                                ev.merge!( {:environment => environment } )
+                            end
                             if @addall
                                 ev.merge!( extras )
                             end
 
                             # Add event to logstash queue
                             event = LogStash::Event.new('message' => ev.to_json)
+                            #if @ecs_compatibility != "disabled"
+                            #    event = ecs(event)
+                            #end
                             decorate(event)
                             queue << event
                             count+=1
@@ -628,4 +636,49 @@ private
         return str.split('=')[1]
     end
 
+=begin
+    def ecs(old)
+        # https://www.elastic.co/guide/en/ecs/current/ecs-field-reference.html
+        ecs = LogStash::Event.new()
+        ecs.set("ecs.version", "1.0.0")
+        ecs.set("@timestamp", old.timestamp)
+        ecs.set("cloud.provider", "azure")
+        ecs.set("cloud.account.id", old.get("[subscription]")
+        ecs.set("cloud.project.id", old.get("[environment]")
+        ecs.set("file.name", old.get("[filename]")
+        ecs.set("event.category", "network")
+        if old.get("[decision]") == "D"
+            ecs.set("event.type", "denied")
+        else
+            ecs.set("event.type", "allowed")
+        end
+        ecs.set("event.action", "")
+        ecs.set("rule.ruleset", old.get("[nsg]")
+        ecs.set("rule.name", old.get("[rule]")
+        ecs.set("trace.id", old.get("[protocol]")+"/"+old.get("[src_ip]")+":"+old.get("[src_port]")+"-"+old.get("[dst_ip]")+":"+old.get("[dst_port]")
+        # requires logic to match sockets and flip src/dst for outgoing. 
+        ecs.set("host.mac", old.get("[mac]")
+        ecs.set("source.ip", old.get("[src_ip]")
+        ecs.set("source.port", old.get("[src_port]")
+        ecs.set("source.bytes", old.get("[srcbytes]")
+        ecs.set("source.packets", old.get("[src_pack]")
+        ecs.set("destination.ip", old.get("[dst_ip]")
+        ecs.set("destination.port", old.get("[dst_port]")
+        ecs.set("destination.bytes", old.get("[dst_bytes]")
+        ecs.set("destination.packets", old.get("[dst_packets]")
+        if old.get("[protocol]") = "U"
+            ecs.set("network.transport", "udp")
+        else
+            ecs.set("network.transport", "tcp")
+        end
+        if old.get("[decision]") == "I"
+            ecs.set("network.direction", "incoming")
+        else
+            ecs.set("network.direction", "outgoing")
+        end
+        ecs.set("network.bytes", old.get("[src_bytes]")+old.get("[dst_bytes]")
+        ecs.set("network.packets", old.get("[src_packets]")+old.get("[dst_packets]")
+        return ecs
+    end
+=end
 end # class LogStash::Inputs::AzureBlobStorage

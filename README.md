@@ -42,9 +42,11 @@ input {
 ## Additional Configuration
 The registry keeps track of files in the storage account, their size and how many bytes have been processed. Files can grow and the added part will be processed as a partial file. The registry is saved todisk every interval.
 
+The interval is also defines when a new round of listing files and processing data should happen. The NSGFLOWLOG's are written every minute into a new block of the hourly blob. This data can be partially read, because the plugin knows the JSON head and tail and removes the leading comma and fixes the JSON before parsing new events
+
 The registry_create_policy determines at the start of the pipeline if processing should resume from the last known unprocessed file, or to start_fresh ignoring old files and start only processing new events that came after the start of the pipeline. Or start_over to process all the files ignoring the registry.
 
-interval defines the minimum time the registry should be saved to the registry file (by default to 'data/registry.dat'), this is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
+interval defines the minimum time the registry should be saved to the registry file. By default to 'data/registry.dat' in the storageaccount, but can be also kept on the server running logstash by setting registry_local_path. The registry is kept also in memory, the registry file is only needed in case the pipeline dies unexpectedly. During a normal shutdown the registry is also saved.
 
 When registry_local_path is set to a directory, the registry is saved on the logstash server in that directory. The filename is the pipe.id
 
@@ -66,13 +68,15 @@ The pipeline can be started in several ways.
    ```
  - As managed pipeline from Kibana
 
-Logstash itself (so not specific to this plugin) has a feature where multiple instances can run on the same system. The default TCP port is 9600, but if it's already in use it will use 9601 (and up). To update a config file on a running instance on the commandline you can add the argument --config.reload.automatic and if you modify the files that are in the pipeline.yml you can send a SIGHUP channel to reload the pipelines where the config was changed. 
+Logstash itself (so not specific to this plugin) has a feature where multiple instances can run on the same system. The default TCP port is 9600, but if it's already in use it will use 9601 (and up), this is probably not true anymore from v8. To update a config file on a running instance on the commandline you can add the argument --config.reload.automatic and if you modify the files that are in the pipeline.yml you can send a SIGHUP channel to reload the pipelines where the config was changed. 
 [https://www.elastic.co/guide/en/logstash/current/reloading-config.html](https://www.elastic.co/guide/en/logstash/current/reloading-config.html)
 
 ## Internal Working 
 When the plugin is started, it will read all the filenames and sizes in the blob store excluding the directies of files that are excluded by the "path_filters". After every interval it will write a registry to the storageaccount to save the information of how many bytes per blob (file) are read and processed. After all files are processed and at least one interval has passed a new file list is generated and a worklist is constructed that will be processed. When a file has already been processed before, partial files are read from the offset to the filesize at the time of the file listing. If the codec is JSON partial files will be have the header and tail will be added. They can be configured. If logtype is nsgflowlog, the plugin will process the splitting into individual tuple events. The logtype wadiis may in the future be used to process the grok formats to split into log lines. Any other format is fed into the queue as one event per file or partial file. It's then up to the filter to split and mutate the file format.
 
-By default the root of the json message is named "message" so you can modify the content in the filter block
+By default the root of the json message is named "message", you can modify the content in the filter block
+
+Additional fields can be enabled with addfilename and addall, ecs_compatibility is not yet supported.
 
 The configurations and the rest of the code are in [https://github.com/janmg/logstash-input-azure_blob_storage/tree/master/lib/logstash/inputs](lib/logstash/inputs) [https://github.com/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb#L10](azure_blob_storage.rb)
 
@@ -130,7 +134,7 @@ filter {
 }
 
 output {
-  stdout { }
+  stdout { codec => rubydebug }
 }
 
 output {
@@ -139,24 +143,37 @@ output {
         index => "nsg-flow-logs-%{+xxxx.ww}"
     }
 }
+
+output {
+    file {
+        path => /tmp/abuse.txt
+        codec => line { format => "%{decision} %{flowstate} %{src_ip} ${dst_port}"}
+    }
+}
+
 ```
 A more elaborate input configuration example
 ```
 input {
     azure_blob_storage {
         codec => "json"
-        storageaccount => "yourstorageaccountname"
-        access_key => "Ba5e64c0d3=="
+        # storageaccount => "yourstorageaccountname"
+        # access_key => "Ba5e64c0d3=="
+        connection_string => "DefaultEndpointsProtocol=https;AccountName=yourstorageaccountname;AccountKey=Ba5e64c0d3==;EndpointSuffix=core.windows.net"
         container => "insights-logs-networksecuritygroupflowevent"
         logtype => "nsgflowlog"
         prefix => "resourceId=/"
         path_filters => ['**/*.json']
         addfilename => true
+        addall => true
+        environment => "dev-env"
         registry_create_policy => "resume"
         registry_local_path => "/usr/share/logstash/plugin"
         interval => 300
         debug_timer => true
-        debug_until => 100
+        debug_until => 1000
+        addall => true
+        registry_create_policy => "start_over"
     }
 }
 

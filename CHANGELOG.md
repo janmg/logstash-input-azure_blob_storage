@@ -1,10 +1,12 @@
 
 ## 0.12.7
   - rewrote partial_read, now the occasional json parse errors should be fixed by reading only commited blocks.
-  -  (This may also have been related to reading a second partial_read, where the offset wasn't updated correctly?)
-  - used the new header and tail block name, should now learn header and footer automatically again
+      (This may also have been related to reading a second partial_read, where the offset wasn't updated correctly?)
+  - used the new header and tail block name, should now learn header and footer automatically again?
   - added addall to the configurations to add system, mac, category, time, operation to the output
+  - added optional environment configuration option
   - removed the date, which was always set to --- 
+  - made a start on event rewriting to make it ECS compatibility
 
 ## 0.12.6
   - Fixed the 0.12.5 exception handling, it actually caused a warning to become a fatal pipeline crashing error
