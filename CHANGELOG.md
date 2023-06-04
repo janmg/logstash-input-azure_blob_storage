@@ -1,3 +1,8 @@
+## 0.12.8
+  - support append blob (use json_lines)
+  - change the default head and tail to an empty string, unless the logtype is nsgflowlog
+  - jsonclean parameter to clean the json stream from faulty charaters to prevent parse errors
+  - catch ContainerNotFound, print error message in log and sleep interval time.
 
 ## 0.12.7
   - rewrote partial_read, now the occasional json parse errors should be fixed by reading only commited blocks.

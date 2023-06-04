@@ -26,7 +26,7 @@ require 'json'
 class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     config_name "azure_blob_storage"
 
-    # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json" and the for WADIIS and APPSERVICE is "line".
+    # If undefined, Logstash will complain, even if codec is unused. The codec for nsgflowlog is "json", "json_line" works and the for WADIIS and APPSERVICE is "line".
     default :codec, "json"
 
     # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue.
@@ -95,10 +95,14 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     config :skip_learning, :validate => :boolean, :default => false, :required => false
 
     # The string that starts the JSON. Only needed when the codec is JSON. When partial file are read, the result will not be valid JSON unless the start and end are put back. the file_head and file_tail are learned at startup, by reading the first file in the blob_list and taking the first and last block, this would work for blobs that are appended like nsgflowlogs. The configuration can be set to override the learning. In case learning fails and the option is not set, the default is to use the 'records' as set by nsgflowlogs.
-    config :file_head, :validate => :string, :required => false, :default => '{"records":['
+    config :file_head, :validate => :string, :required => false, :default => ''
     # The string that ends the JSON
-    config :file_tail, :validate => :string, :required => false, :default => ']}'
+    config :file_tail, :validate => :string, :required => false, :default => ''
 
+    # inspect the bytes and remove faulty characters it's an array of byte values, e.g. to remove all escape characters use ['27']
+    config :cleanjson, :validate => :array, :default => ['27'], :required => false
+
+    config :append, :validate => :boolean, :default => false, :required => false
     # By default it will watch every file in the storage container. The prefix option is a simple filter that only processes files with a path that starts with that value.
     # For NSGFLOWLOGS a path starts with "resourceId=/". This would only be needed to exclude other paths that may be written in the same container. The registry file will be excluded.
     # You may also configure multiple paths. See an example on the <<array,Logstash configuration page>>.
@@ -178,6 +182,10 @@ public
         @tail = ''
         # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
         if @is_json
+            if @logtype = 'nsgflowlog'
+                @head = '{"records":['
+                @tail = ']}'
+            end
             if file_head
                 @head = file_head
             end
@@ -187,7 +195,7 @@ public
             if file_head and file_tail and !skip_learning
                 learn_encapsulation
             end
-            @logger.info("head will be: #{@head} and tail is set to #{@tail}")
+            @logger.info("head will be: '#{@head}' and tail is set to: '#{@tail}'")
         end
 
         filelist = Hash.new
@@ -249,7 +257,7 @@ public
                     size = 0
                     if file[:offset] == 0
                         # This is where Sera4000 issue starts
-                        # For an append blob, reading full and crashing, retry, last_modified? ... lenght? ... committed? ...
+                        # Append blob, list_block_blob doesn't work ...
                         # length and skip reg value
                         if (file[:length] > 0)
                             begin
@@ -270,6 +278,13 @@ public
                     else
                         chunk = partial_read(name, file[:offset])
                         delta_size = chunk.size - @head.length - 1
+                    end
+
+                    # todo: @is_json or @is_json_lines and cleanjson
+                    unless cleanjson.nil? && (@is_json || @is_json_lines)
+                        cleanjson.each do |scrub|
+                            chunk.delete(scrub)
+                        end
                     end
 
                     if logtype == "nsgflowlog" && @is_json
@@ -410,10 +425,15 @@ private
         # 3. strip comma
         # if json strip comma and fix head and tail
         size = 0
-        blocks = @blob_client.list_blob_blocks(container, blobname)
-        blocks[:committed].each do |block|
-            size += block.size
+
+        if @append
+            return @blob_client.get_blob(container, blobname, start_range: offset-1)
         end
+        begin
+            blocks = @blob_client.list_blob_blocks(container, blobname)
+            blocks[:committed].each do |block|
+                size += block.size
+            end
         # read the new blob blocks from the offset to the last committed size.
         # if it is json, fix the head and tail
         # crap committed block at the end is the tail, so must be substracted from the read and then comma stripped and tail added.
@@ -434,6 +454,9 @@ private
         else
             content = @blob_client.get_blob(container, blobname, start_range: offset, end_range: size-1)[1]
         end
+      rescue Exception => e
+        @logger.error("caught #{e.message} ... if this is an HTTPError InvalidBlobType please set append in the configs")
+      end
     end
 
     def strip_comma(str)
@@ -527,11 +550,13 @@ private
 
     def try_list_blobs(fill)
         # inspired by: http://blog.mirthlab.com/2012/05/25/cleanly-retrying-blocks-of-code-after-an-exception-in-ruby/
+        # todo: catch ContainerNotFound
         chrono = Time.now.to_i
         files = Hash.new
         nextMarker = nil
         counter = 1
         loop do
+          begin
             blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
             blobs.each do |blob|
                 # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
@@ -552,6 +577,10 @@ private
             break unless nextMarker && !nextMarker.empty?
             if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
             counter+=1
+          rescue Exception => e
+            @logger.error("caught: #{e.message} while trying to list blobs")
+            return files
+          end
         end
         if @debug_timer
             @logger.info("list_blobs took #{Time.now.to_i - chrono} sec")
