@@ -8,6 +8,14 @@ For problems or feature requests with this specific plugin, raise a github issue
 This plugin can read from Azure Storage Blobs, for instance JSON diagnostics logs for NSG flow logs or LINE based accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
 
+## Alternatives
+This plugin was inspired by the Azure diagnostics tools, but should work better for bigger amounts of files. the configuration is not compatible, the configuration azureblob refers to the diagnostics tools plugin and this plugin uses azure_blob_storage
+https://github.com/Azure/azure-diagnostics-tools/tree/master/Logstash/logstash-input-azureblob
+
+There is a Filebeat plugin, that may work in the future
+https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-input-azure-blob-storage.html
+
+## Innerworking
 The plugin depends on the [Ruby library azure-storage-blob](https://rubygems.org/gems/azure-storage-blob/versions/1.1.0) from Microsoft, that depends on Faraday for the HTTPS connection to Azure.
 
 The plugin executes the following steps
