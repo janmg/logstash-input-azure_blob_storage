@@ -182,7 +182,7 @@ public
         @tail = ''
         # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
         if @is_json
-            if @logtype = 'nsgflowlog'
+            if @logtype == 'nsgflowlog'
                 @head = '{"records":['
                 @tail = ']}'
             end
@@ -287,6 +287,15 @@ public
                         end
                     end
 
+                    #
+                    # TODO! ... split out the logtypes and use individual methods
+                    # how does a byte array chuck from json_lines get translated to strings/json/events
+                    # should the byte array be converted to a multiline and then split? drawback need to know characterset and linefeed characters
+                    # should I create a second version of the plugin?
+                    # how does the json_line decoder work on byte arrays?
+                    #
+                    # so many questions
+                    #
                     if logtype == "nsgflowlog" && @is_json
                         # skip empty chunks
                         unless chunk.nil?
@@ -303,6 +312,21 @@ public
                     # TODO: Convert this to line based grokking.
                     elsif logtype == "wadiis" && !@is_json
                         @processed += wadiislog(queue, name)
+                    elsif @is_json_lines
+                        # parse one line at a time and dump it in the chunk
+                        lines = chunk.pack('c*').split("\n")
+                        counter = 0
+                        lines.each do |line|
+                          begin
+                            @codec.decode(line) do |event|
+                                counter += 1
+                                queue << event
+                            end
+                            @processed += counter
+                          rescue Exception => e
+                            @logger.error("json_lines codec exception: #{e.message} .. continue and pretend this never happened")
+                          end
+                        end
                     else
                         # Handle JSONLines format
                         if !@chunk.nil? && @is_json_line
@@ -328,8 +352,8 @@ public
                             end
                             @processed += counter
                         rescue Exception => e
-                            @logger.error("codec exception: #{e.message} .. will continue and pretend this never happened")
-                            @logger.debug("#{chunk}")
+                            # todo: fix codec_lines exception: no implicit conversion of Array into String
+                            @logger.error("codec exception: #{e.message} .. continue and pretend this never happened")
                         end
                     end
 
@@ -455,7 +479,7 @@ private
             content = @blob_client.get_blob(container, blobname, start_range: offset, end_range: size-1)[1]
         end
       rescue Exception => e
-        @logger.error("caught #{e.message} ... if this is an HTTPError InvalidBlobType please set append in the configs")
+        @logger.error("caught #{e.message} ... if this is an InvalidBlobType, set append => true")
       end
     end
 
@@ -550,7 +574,6 @@ private
 
     def try_list_blobs(fill)
         # inspired by: http://blog.mirthlab.com/2012/05/25/cleanly-retrying-blocks-of-code-after-an-exception-in-ruby/
-        # todo: catch ContainerNotFound
         chrono = Time.now.to_i
         files = Hash.new
         nextMarker = nil
