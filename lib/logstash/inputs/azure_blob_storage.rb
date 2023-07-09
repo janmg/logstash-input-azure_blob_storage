@@ -122,6 +122,7 @@ public
         @logger.info("If this plugin doesn't work, please raise an issue in https://github.com/janmg/logstash-input-azure_blob_storage")
         @busy_writing_registry = Mutex.new
         # TODO: consider multiple readers, so add pipeline @id or use logstash-to-logstash communication?
+        # For now it's difficult because the plugin would then have to synchronize the worklist
     end
 
 
@@ -132,42 +133,7 @@ public
         @regsaved = @processed
 
         connect
-
-        @registry = Hash.new
-        if registry_create_policy == "resume"
-            for counter in 1..3
-                begin
-                    if (!@registry_local_path.nil?)
-                        unless File.file?(@registry_local_path+"/"+@pipe_id)
-                            @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
-                            #[0] headers [1] responsebody
-                            @logger.info("migrating from remote registry #{registry_path}")
-                        else
-                            if !Dir.exist?(@registry_local_path)
-                                FileUtils.mkdir_p(@registry_local_path)
-                            end
-                            @registry = Marshal.load(File.read(@registry_local_path+"/"+@pipe_id))
-                            @logger.info("resuming from local registry #{registry_local_path+"/"+@pipe_id}")
-                        end
-                    else
-                        @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
-                        #[0] headers [1] responsebody
-                        @logger.info("resuming from remote registry #{registry_path}")
-                    end
-                    break
-                rescue Exception => e
-                    @logger.error("caught: #{e.message}")
-                    @registry.clear
-                    @logger.error("loading registry failed for attempt #{counter} of 3")
-                end
-             end
-        end
-        # read filelist and set offsets to file length to mark all the old files as done
-        if registry_create_policy == "start_fresh"
-            @registry = list_blobs(true)
-            save_registry()
-            @logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
-        end
+        @registry = load_registry
 
         @is_json = false
         @is_json_line = false
@@ -178,10 +144,12 @@ public
                 @is_json_line = true
             end
         end
+
+
         @head = ''
         @tail = ''
+        unless @is_json && skip_learning
         # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
-        if @is_json
             if @logtype == 'nsgflowlog'
                 @head = '{"records":['
                 @tail = ']}'
@@ -192,7 +160,7 @@ public
             if file_tail
                 @tail = file_tail
             end
-            if file_head and file_tail and !skip_learning
+            if !skip_learning
                 learn_encapsulation
             end
             @logger.info("head will be: '#{@head}' and tail is set to: '#{@tail}'")
@@ -214,24 +182,10 @@ public
             # load the registry, compare it's offsets to file list, set offset to 0 for new files, process the whole list and if finished within the interval wait for next loop,
             # TODO: sort by timestamp ?
             #filelist.sort_by(|k,v|resource(k)[:date])
-            worklist.clear
             filelist.clear
 
             # Listing all the files
-            filelist = list_blobs(false)
-            filelist.each do |name, file|
-                off = 0
-                if @registry.key?(name) then
-                  begin
-                    off = @registry[name][:offset]
-                  rescue Exception => e
-                    @logger.error("caught: #{e.message} while reading #{name}")
-                  end
-                end
-                @registry.store(name, { :offset => off, :length => file[:length] })
-                if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
-            end
-            # size nilClass when the list doesn't grow?!
+            filelist = list_files
 
             # clean registry of files that are not in the filelist
             @registry.each do |name,file|
@@ -250,14 +204,16 @@ public
 
             # Start of processing
             # This would be ideal for threading since it's IO intensive, would be nice with a ruby native ThreadPool
+            # pool = Concurrent::FixedThreadPool.new(5) # 5 threads
+            #pool.post do
+            # some parallel work
+            #end
             if (worklist.size > 0) then
                 worklist.each do |name, file|
                     start = Time.now.to_i
                     if (@debug_until > @processed) then @logger.info("3: processing #{name} from #{file[:offset]} to #{file[:length]}") end
                     size = 0
                     if file[:offset] == 0
-                        # This is where Sera4000 issue starts
-                        # Append blob, list_block_blob doesn't work ...
                         # length and skip reg value
                         if (file[:length] > 0)
                             begin
@@ -393,6 +349,24 @@ public
 
 
 private
+    def list_files
+        filelist = list_blobs(false)
+        filelist.each do |name, file|
+            off = 0
+            if @registry.key?(name) then
+                begin
+                    off = @registry[name][:offset]
+                rescue Exception => e
+                    @logger.error("caught: #{e.message} while reading #{name}")
+                end
+            end
+            @registry.store(name, { :offset => off, :length => file[:length] })
+            if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
+        end
+        return filelist
+    end
+    # size nilClass when the list doesn't grow?!
+
     def connect
         # Try in this order to access the storageaccount
         # 1. storageaccount / sas_token
@@ -421,6 +395,44 @@ private
             # else
             #     @logger.info("development storage emulator not yet implemented")
             # end
+        end
+    end
+
+    def load_registry
+        @registry = Hash.new
+        if registry_create_policy == "resume"
+            for counter in 1..3
+                begin
+                    if (!@registry_local_path.nil?)
+                        unless File.file?(@registry_local_path+"/"+@pipe_id)
+                            @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+                            #[0] headers [1] responsebody
+                            @logger.info("migrating from remote registry #{registry_path}")
+                        else
+                            if !Dir.exist?(@registry_local_path)
+                                FileUtils.mkdir_p(@registry_local_path)
+                            end
+                            @registry = Marshal.load(File.read(@registry_local_path+"/"+@pipe_id))
+                            @logger.info("resuming from local registry #{registry_local_path+"/"+@pipe_id}")
+                        end
+                    else
+                        @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+                        #[0] headers [1] responsebody
+                        @logger.info("resuming from remote registry #{registry_path}")
+                    end
+                    break
+                rescue Exception => e
+                    @logger.error("caught: #{e.message}")
+                    @registry.clear
+                    @logger.error("loading registry failed for attempt #{counter} of 3")
+                end
+             end
+        end
+        # read filelist and set offsets to file length to mark all the old files as done
+        if registry_create_policy == "start_fresh"
+            @registry = list_blobs(true)
+            save_registry()
+            @logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
         end
     end
 
@@ -688,6 +700,7 @@ private
         return str.split('=')[1]
     end
 
+    # This is a start towards mapping NSG events to ECS fields ... it's complicated
 =begin
     def ecs(old)
         # https://www.elastic.co/guide/en/ecs/current/ecs-field-reference.html
