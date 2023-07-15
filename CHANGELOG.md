@@ -1,3 +1,6 @@
+## 0.12.9
+  - fixed the processing of non json and json_lines codecs
+
 ## 0.12.8
   - support append blob (use codec json_lines and logtype raw)
   - change the default head and tail to an empty string, unless the logtype is nsgflowlog
