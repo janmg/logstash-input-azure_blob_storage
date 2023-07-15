@@ -1,3 +1,5 @@
+# NOTE! 0.12.8 is out on July 15, it works for me, but please test and report back issues. Stay on 0.12.7 for your production
+
 # Logstash 
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
