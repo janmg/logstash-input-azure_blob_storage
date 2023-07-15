@@ -68,7 +68,7 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
     config :registry_create_policy, :validate => ['resume','start_over','start_fresh'], :required => false, :default => 'resume'
 
-	   # The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
+    # The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
     # waiting time in seconds until processing the next batch. NSGFLOWLOGS append a block per minute, so use multiples of 60 seconds, 300 for 5 minutes, 600 for 10 minutes. The registry is also saved after every interval.
     # Partial reading starts from the offset and reads until the end, so the starting tag is prepended
     config :interval, :validate => :number, :default => 60
@@ -307,6 +307,8 @@ public
                             if cleanjson
                                 @logger.info("cleaning in progress")
                                 lines.chars.select(&:valid_encoding?).join
+                                #lines.delete "\\"
+                                #lines.scrub{|bytes| '<'+bytes.unpack('H*')[0]+'>' }
                             end
                             begin
                                 @codec.decode(lines) do |event|
@@ -471,7 +473,6 @@ private
 
         begin
             if @append
-                @logger.info("going to read some append stuff #{blobname} with offset #{offset}")
                 return @blob_client.get_blob(@container, blobname, start_range: offset-1)[1]
             end
             blocks = @blob_client.list_blob_blocks(@container, blobname)

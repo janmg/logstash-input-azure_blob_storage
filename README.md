@@ -192,6 +192,20 @@ output {
     }
 }
 ```
+
+Another for json_lines on append_blobs
+```
+input {
+    azure_blob_storage {
+        codec => json_lines {
+          delimiter => "\n"
+          charset => "UTF-8"
+        }
+        # below options are optional
+        logtype => "raw"
+        append => true
+        cleanjson => true
+```
 The configuration documentation is in the first 100 lines of the code
 [GITHUB/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb](https://github.com/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb)
 
@@ -235,6 +249,10 @@ filter {
     remove_field => ["port"]
     remove_field => ["timestamp"]
   }
+}
+
+output {
+  stdout { codec => rubydebug }
 }
 ```
 

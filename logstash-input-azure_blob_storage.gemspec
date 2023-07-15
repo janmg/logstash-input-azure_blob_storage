@@ -24,5 +24,5 @@ EOF
     s.add_runtime_dependency 'stud', '~> 0.0.23'
     s.add_runtime_dependency 'azure-storage-blob', '~> 2', '>= 2.0.3'
     s.add_development_dependency 'logstash-devutils', '~> 2.4'
-    s.add_development_dependency 'rubocop', '~> 1.48'
+    s.add_development_dependency 'rubocop', '~> 1.50'
 end

@@ -1,7 +1,7 @@
 ## 0.12.8
-  - support append blob (use json_lines)
+  - support append blob (use codec json_lines and logtype raw)
   - change the default head and tail to an empty string, unless the logtype is nsgflowlog
-  - jsonclean parameter to clean the json stream from faulty charaters to prevent parse errors
+  - jsonclean configuration parameter to clean the json stream from faulty characters to prevent parse errors
   - catch ContainerNotFound, print error message in log and sleep interval time.
 
 ## 0.12.7
