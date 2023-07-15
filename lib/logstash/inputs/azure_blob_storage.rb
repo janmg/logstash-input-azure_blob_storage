@@ -321,6 +321,24 @@ public
                                 @logger.error("json_lines codec exception: #{e.message} .. continue and pretend this never happened")
                             end
                         end
+
+                        if !@is_json_line && !@is_json
+                            if logtype == "wadiis"
+                                # TODO: Convert this to line based grokking.
+                                @processed += wadiislog(queue, name)
+                            else
+                                # Any other codec and logstyle
+                                begin
+                                    @codec.decode(chunk) do |event|
+                                        counter += 1
+                                        queue << event
+                                    end
+                                    @processed += counter
+                                rescue Exception => e
+                                @logger.error("other codec exception: #{e.message} .. continue and pretend this never happened")
+                                end
+                            end
+                        end
                     end
 
                     # Update the size
