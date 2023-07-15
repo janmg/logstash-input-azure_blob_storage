@@ -68,7 +68,7 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # when set to `start_fresh`, it will read log files that are created or appended since this start of the pipeline.
     config :registry_create_policy, :validate => ['resume','start_over','start_fresh'], :required => false, :default => 'resume'
 
-	# The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
+	   # The interval is used to save the registry regularly, when new events have have been processed. It is also used to wait before listing the files again and substracting the registry of already processed files to determine the worklist.
     # waiting time in seconds until processing the next batch. NSGFLOWLOGS append a block per minute, so use multiples of 60 seconds, 300 for 5 minutes, 600 for 10 minutes. The registry is also saved after every interval.
     # Partial reading starts from the offset and reads until the end, so the starting tag is prepended
     config :interval, :validate => :number, :default => 60
@@ -99,8 +99,8 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     # The string that ends the JSON
     config :file_tail, :validate => :string, :required => false, :default => ''
 
-    # inspect the bytes and remove faulty characters it's an array of byte values, e.g. to remove all escape characters use ['27']
-    config :cleanjson, :validate => :array, :default => ['27'], :required => false
+    # inspect the bytes and remove faulty characters
+    config :cleanjson, :validate => :boolean, :default => false, :required => false
 
     config :append, :validate => :boolean, :default => false, :required => false
     # By default it will watch every file in the storage container. The prefix option is a simple filter that only processes files with a path that starts with that value.
@@ -133,7 +133,11 @@ public
         @regsaved = @processed
 
         connect
-        @registry = load_registry
+        @registry = Hash.new
+        load_registry()
+        @registry.each do |name, file|
+            @logger.info("offset: #{file[:offset]} length: #{file[:length]}")
+        end
 
         @is_json = false
         @is_json_line = false
@@ -148,8 +152,8 @@ public
 
         @head = ''
         @tail = ''
-        unless @is_json && skip_learning
-        # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
+        if @is_json
+            # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
             if @logtype == 'nsgflowlog'
                 @head = '{"records":['
                 @tail = ']}'
@@ -165,6 +169,7 @@ public
             end
             @logger.info("head will be: '#{@head}' and tail is set to: '#{@tail}'")
         end
+
 
         filelist = Hash.new
         worklist = Hash.new
@@ -185,7 +190,24 @@ public
             filelist.clear
 
             # Listing all the files
-            filelist = list_files
+            filelist = list_blobs(false)
+            if (@debug_until > @processed) then
+                @registry.each do |name, file|
+                    @logger.info("#{name} offset: #{file[:offset]} length: #{file[:length]}")
+                end
+            end
+            filelist.each do |name, file|
+                off = 0
+                if @registry.key?(name) then
+                    begin
+                        off = @registry[name][:offset]
+                    rescue Exception => e
+                        @logger.error("caught: #{e.message} while reading #{name}")
+                    end
+                end
+                @registry.store(name, { :offset => off, :length => file[:length] })
+                if (@debug_until > @processed) then @logger.info("2: adding offsets: #{name} #{off} #{file[:length]}") end
+            end
 
             # clean registry of files that are not in the filelist
             @registry.each do |name,file|
@@ -236,80 +258,66 @@ public
                         delta_size = chunk.size - @head.length - 1
                     end
 
-                    # todo: @is_json or @is_json_lines and cleanjson
-                    unless cleanjson.nil? && (@is_json || @is_json_lines)
-                        cleanjson.each do |scrub|
-                            chunk.delete(scrub)
-                        end
-                    end
-
                     #
                     # TODO! ... split out the logtypes and use individual methods
                     # how does a byte array chuck from json_lines get translated to strings/json/events
                     # should the byte array be converted to a multiline and then split? drawback need to know characterset and linefeed characters
-                    # should I create a second version of the plugin?
                     # how does the json_line decoder work on byte arrays?
                     #
                     # so many questions
-                    #
-                    if logtype == "nsgflowlog" && @is_json
-                        # skip empty chunks
-                        unless chunk.nil?
-                            res = resource(name)
-                            begin
-                                fingjson = JSON.parse(chunk)
-                                @processed += nsgflowlog(queue, fingjson, name)
-                                @logger.debug("Processed #{res[:nsg]} #{@processed} events")
-                            rescue JSON::ParserError => e
-                                @logger.error("parse error #{e.message} on #{res[:nsg]} offset: #{file[:offset]} length: #{file[:length]}")
-                                if (@debug_until > @processed) then @logger.info("#{chunk}") end
-                            end
-                        end
-                    # TODO: Convert this to line based grokking.
-                    elsif logtype == "wadiis" && !@is_json
-                        @processed += wadiislog(queue, name)
-                    elsif @is_json_lines
-                        # parse one line at a time and dump it in the chunk
-                        lines = chunk.pack('c*').split("\n")
-                        counter = 0
-                        lines.each do |line|
-                          begin
-                            @codec.decode(line) do |event|
-                                counter += 1
-                                queue << event
-                            end
-                            @processed += counter
-                          rescue Exception => e
-                            @logger.error("json_lines codec exception: #{e.message} .. continue and pretend this never happened")
+
+                    unless chunk.nil?
+                    counter = 0
+                        if @is_json
+                            if logtype == "nsgflowlog"
+                                res = resource(name)
+                                begin
+                                    fingjson = JSON.parse(chunk)
+                                    @processed += nsgflowlog(queue, fingjson, name)
+                                    @logger.debug("Processed #{res[:nsg]} #{@processed} events")
+                                rescue JSON::ParserError => e
+                                    @logger.error("parse error #{e.message} on #{res[:nsg]} offset: #{file[:offset]} length: #{file[:length]}")
+                                    if (@debug_until > @processed) then @logger.info("#{chunk}") end
+                                end
+                            else
+                                begin
+                                    @codec.decode(chunk) do |event|
+                                        counter += 1
+                                        if @addfilename
+                                            event.set('filename', name)
+                                        end
+                                        decorate(event)
+                                        queue << event
+                                     end
+                                     @processed += counter
+                                 rescue Exception => e
+                                     @logger.error("codec exception: #{e.message} .. continue and pretend this never happened")
+                                 end
+                             end
                           end
-                        end
-                    else
-                        # Handle JSONLines format
-                        if !@chunk.nil? && @is_json_line
-                            newline_rindex = chunk.rindex("\n")
-                            if newline_rindex.nil?
-                                # No full line in chunk, skip it without updating the registry.
-                                # Expecting that the JSON line would be filled in at a subsequent iteration.
-                                next
-                            end
-                            chunk = chunk[0..newline_rindex]
-                            delta_size = chunk.size
+
+                        if logtype == "wadiis" && !@is_json
+                            # TODO: Convert this to line based grokking.
+                            @processed += wadiislog(queue, name)
                         end
 
-                        counter = 0
-                        begin
-                            @codec.decode(chunk) do |event|
-                                counter += 1
-                                if @addfilename
-                                    event.set('filename', name)
-                                end
-                                decorate(event)
-                                queue << event
+                        if @is_json_line
+                            # parse one line at a time and dump it in the chunk?
+                            lines = chunk.to_s
+                            if cleanjson
+                                @logger.info("cleaning in progress")
+                                lines.chars.select(&:valid_encoding?).join
                             end
-                            @processed += counter
-                        rescue Exception => e
-                            # todo: fix codec_lines exception: no implicit conversion of Array into String
-                            @logger.error("codec exception: #{e.message} .. continue and pretend this never happened")
+                            begin
+                                @codec.decode(lines) do |event|
+                                    counter += 1
+                                    queue << event
+                                end
+                                @processed += counter
+                            rescue Exception => e
+                                # todo: fix codec_lines exception: no implicit conversion of Array into String
+                                @logger.error("json_lines codec exception: #{e.message} .. continue and pretend this never happened")
+                            end
                         end
                     end
 
@@ -397,28 +405,27 @@ private
             # end
         end
     end
-
-    def load_registry
-        @registry = Hash.new
-        if registry_create_policy == "resume"
+    # @registry_create_policy,@registry_local_path,@container,@registry_path
+    def load_registry()
+        if @registry_create_policy == "resume"
             for counter in 1..3
                 begin
                     if (!@registry_local_path.nil?)
                         unless File.file?(@registry_local_path+"/"+@pipe_id)
-                            @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+                            @registry = Marshal.load(@blob_client.get_blob(@container, path)[1])
                             #[0] headers [1] responsebody
-                            @logger.info("migrating from remote registry #{registry_path}")
+                            @logger.info("migrating from remote registry #{path}")
                         else
                             if !Dir.exist?(@registry_local_path)
                                 FileUtils.mkdir_p(@registry_local_path)
                             end
                             @registry = Marshal.load(File.read(@registry_local_path+"/"+@pipe_id))
-                            @logger.info("resuming from local registry #{registry_local_path+"/"+@pipe_id}")
+                            @logger.info("resuming from local registry #{@registry_local_path+"/"+@pipe_id}")
                         end
                     else
-                        @registry = Marshal.load(@blob_client.get_blob(container, registry_path)[1])
+                        @registry = Marshal.load(@blob_client.get_blob(container, path)[1])
                         #[0] headers [1] responsebody
-                        @logger.info("resuming from remote registry #{registry_path}")
+                        @logger.info("resuming from remote registry #{path}")
                     end
                     break
                 rescue Exception => e
@@ -429,17 +436,17 @@ private
              end
         end
         # read filelist and set offsets to file length to mark all the old files as done
-        if registry_create_policy == "start_fresh"
+        if @registry_create_policy == "start_fresh"
             @registry = list_blobs(true)
-            save_registry()
-            @logger.info("starting fresh, writing a clean registry to contain #{@registry.size} blobs/files")
+            #save_registry()
+            @logger.info("starting fresh, with a clean registry containing #{@registry.size} blobs/files")
         end
     end
 
     def full_read(filename)
         tries ||= 2
         begin
-            return @blob_client.get_blob(container, filename)[1]
+            return @blob_client.get_blob(@container, filename)[1]
         rescue Exception => e
             @logger.error("caught: #{e.message} for full_read")
             if (tries -= 1) > 0
@@ -450,7 +457,7 @@ private
             end
         end
         begin
-            chuck = @blob_client.get_blob(container, filename)[1]
+            chuck = @blob_client.get_blob(@container, filename)[1]
         end
         return chuck
     end
@@ -462,37 +469,46 @@ private
         # if json strip comma and fix head and tail
         size = 0
 
-        if @append
-            return @blob_client.get_blob(container, blobname, start_range: offset-1)
-        end
         begin
-            blocks = @blob_client.list_blob_blocks(container, blobname)
+            if @append
+                @logger.info("going to read some append stuff #{blobname} with offset #{offset}")
+                return @blob_client.get_blob(@container, blobname, start_range: offset-1)[1]
+            end
+            blocks = @blob_client.list_blob_blocks(@container, blobname)
             blocks[:committed].each do |block|
                 size += block.size
             end
-        # read the new blob blocks from the offset to the last committed size.
-        # if it is json, fix the head and tail
-        # crap committed block at the end is the tail, so must be substracted from the read and then comma stripped and tail added.
-        # but why did I need a -1 for the length?? probably the offset starts at 0 and ends at size-1
+            # read the new blob blocks from the offset to the last committed size.
+            # if it is json, fix the head and tail
+            # crap committed block at the end is the tail, so must be substracted from the read and then comma stripped and tail added.
+            # but why did I need a -1 for the length?? probably the offset starts at 0 and ends at size-1
 
-        # should first check commit, read and the check committed again? no, only read the commited size
-        # should read the full content and then substract json tail
+            # should first check commit, read and the check committed again? no, only read the commited size
+            # should read the full content and then substract json tail
 
-        if @is_json
-            content = @blob_client.get_blob(container, blobname, start_range: offset-1, end_range: size-1)[1]
-            if content.end_with?(@tail)
-                return @head + strip_comma(content)
+            unless @is_json
+                return @blob_client.get_blob(@container, blobname, start_range: offset, end_range: size-1)[1]
             else
-                @logger.info("Fixed a tail! probably new committed blocks started appearing!")
-                # substract the length of the tail and add the tail, because the file grew.size was calculated as the block boundary, so replacing the last bytes with the tail should fix the problem 
-                return @head + strip_comma(content[0...-@tail.length]) + @tail
+                content = @blob_client.get_blob(@container, blobname, start_range: offset-1, end_range: size-1)[1]
+                if content.end_with?(@tail)
+                    return @head + strip_comma(content)
+                else
+                    @logger.info("Fixed a tail! probably new committed blocks started appearing!")
+                    # substract the length of the tail and add the tail, because the file grew.size was calculated as the block boundary, so replacing the last bytes with the tail should fix the problem 
+                    return @head + strip_comma(content[0...-@tail.length]) + @tail
+                end
             end
-        else
-            content = @blob_client.get_blob(container, blobname, start_range: offset, end_range: size-1)[1]
+        rescue InvalidBlobType => ibt
+            @logger.error("caught #{ibt.message}. Setting BlobType to append")
+            @append = true
+            retry
+        rescue NoMethodError => nme
+            @logger.error("caught #{nme.message}. Setting append to true")
+            @append = true
+            retry
+        rescue Exception => e
+            @logger.error("caught #{e.message}")
         end
-      rescue Exception => e
-        @logger.error("caught #{e.message} ... if this is an InvalidBlobType, set append => true")
-      end
     end
 
     def strip_comma(str)
@@ -591,31 +607,31 @@ private
         nextMarker = nil
         counter = 1
         loop do
-          begin
-            blobs = @blob_client.list_blobs(container, { marker: nextMarker, prefix: @prefix})
-            blobs.each do |blob|
-                # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
-                # FNM_EXTGLOB allows you to use "test{a,b,c}" to match either "testa", "testb" or "testc" (closer to shell behavior)
-                unless blob.name == registry_path
-                    if @path_filters.any? {|path| File.fnmatch?(path, blob.name, File::FNM_PATHNAME | File::FNM_EXTGLOB)}
-                        length = blob.properties[:content_length].to_i
-                        offset = 0
-                        if fill
-                            offset = length
+            begin
+                blobs = @blob_client.list_blobs(@container, { marker: nextMarker, prefix: @prefix})
+                blobs.each do |blob|
+                    # FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
+                    # FNM_EXTGLOB allows you to use "test{a,b,c}" to match either "testa", "testb" or "testc" (closer to shell behavior)
+                    unless blob.name == registry_path
+                        if @path_filters.any? {|path| File.fnmatch?(path, blob.name, File::FNM_PATHNAME | File::FNM_EXTGLOB)}
+                            length = blob.properties[:content_length].to_i
+                            offset = 0
+                            if fill
+                                offset = length
+                            end
+                            files.store(blob.name, { :offset => offset, :length => length })
+                            if (@debug_until > @processed) then @logger.info("1: list_blobs #{blob.name} #{offset} #{length}") end
                         end
-                        files.store(blob.name, { :offset => offset, :length => length })
-                        if (@debug_until > @processed) then @logger.info("1: list_blobs #{blob.name} #{offset} #{length}") end
                     end
                 end
+                nextMarker = blobs.continuation_token
+                break unless nextMarker && !nextMarker.empty?
+                if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
+                counter+=1
+            rescue Exception => e
+                @logger.error("caught: #{e.message} while trying to list blobs")
+                return files
             end
-            nextMarker = blobs.continuation_token
-            break unless nextMarker && !nextMarker.empty?
-            if (counter % 10 == 0) then @logger.info(" listing #{counter * 50000} files") end
-            counter+=1
-          rescue Exception => e
-            @logger.error("caught: #{e.message} while trying to list blobs")
-            return files
-          end
         end
         if @debug_timer
             @logger.info("list_blobs took #{Time.now.to_i - chrono} sec")
@@ -635,7 +651,7 @@ private
                     begin
                         @busy_writing_registry.lock
                         unless (@registry_local_path)
-                            @blob_client.create_block_blob(container, registry_path, regdump)
+                            @blob_client.create_block_blob(@container, registry_path, regdump)
                             @logger.info("processed #{@processed} events, saving #{regsize} blobs and offsets to remote registry #{registry_path}")
                         else
                             File.open(@registry_local_path+"/"+@pipe_id, 'w') { |file| file.write(regdump) }
@@ -661,20 +677,20 @@ private
         @logger.info("learn_encapsulation, this can be skipped by setting skip_learning => true. Or set both head_file and tail_file")
         # From one file, read first block and last block to learn head and tail
         begin
-            blobs = @blob_client.list_blobs(container, { max_results: 3, prefix: @prefix})
+            blobs = @blob_client.list_blobs(@container, { max_results: 3, prefix: @prefix})
             blobs.each do |blob|
                 unless blob.name == registry_path
                     begin
-                        blocks = @blob_client.list_blob_blocks(container, blob.name)[:committed]
+                        blocks = @blob_client.list_blob_blocks(@container, blob.name)[:committed]
                         if ['A00000000000000000000000000000000','QTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw'].include?(blocks.first.name)
                             @logger.debug("using #{blob.name}/#{blocks.first.name} to learn the json header")
-                            @head = @blob_client.get_blob(container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
+                            @head = @blob_client.get_blob(@container, blob.name, start_range: 0, end_range: blocks.first.size-1)[1]
                         end
                         if ['Z00000000000000000000000000000000','WjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw'].include?(blocks.last.name)
                             @logger.debug("using #{blob.name}/#{blocks.last.name} to learn the json footer")
                             length = blob.properties[:content_length].to_i
                             offset = length - blocks.last.size
-                            @tail = @blob_client.get_blob(container, blob.name, start_range: offset, end_range: length-1)[1]
+                            @tail = @blob_client.get_blob(@container, blob.name, start_range: offset, end_range: length-1)[1]
                             @logger.debug("learned tail: #{@tail}")
                         end
                     rescue Exception => e
@@ -699,8 +715,9 @@ private
     def val(str)
         return str.split('=')[1]
     end
+end # class LogStash::Inputs::AzureBlobStorage
 
-    # This is a start towards mapping NSG events to ECS fields ... it's complicated
+# This is a start towards mapping NSG events to ECS fields ... it's complicated
 =begin
     def ecs(old)
         # https://www.elastic.co/guide/en/ecs/current/ecs-field-reference.html
@@ -746,4 +763,3 @@ private
         return ecs
     end
 =end
-end # class LogStash::Inputs::AzureBlobStorage
