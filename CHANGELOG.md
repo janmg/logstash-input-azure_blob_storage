@@ -1,3 +1,7 @@
+## 0.12.10 (Not yet started)
+  - gzip support
+  - csv support
+
 ## 0.12.9
   - fixed the processing of non json and json_lines codecs
 
