@@ -1,5 +1,3 @@
-# NOTE! 0.12.8 is out on July 15, it works for me, but please test and report back issues. Stay on 0.12.7 for your production
-
 # Logstash 
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
@@ -30,9 +28,25 @@ The plugin executes the following steps
 7. If logstash is stopped, a stop signal will try to finish the current file, save the registry and than quit
 
 ## Installation 
-This plugin can be installed through logstash-plugin
+This plugin can be installed through logstash-plugin as documented https://www.elastic.co/guide/en/logstash/current/working-with-plugins.html#listing-plugins. This should pull the latest version from rubygems https://rubygems.org/gems/logstash-input-azure_blob_storage
+
 ```
 /usr/share/logstash/bin/logstash-plugin install logstash-input-azure_blob_storage
+```
+
+For Ubuntu I use these commands, to list, update, remove and install
+```
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin list --verbose
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin update
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin update logstash-input-azure_blob_storage
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin remove logstash-input-azurestorage
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin install logstash-input-azure_blob_storage
+
+Alternatively you can use the commands from the build.sh script to build and install the gem locally. This you don't have to do, unless you want to modify the code in lib/logstash/inputs/azure_blob_storage.rb
+```
+sudo -u logstash gem build logstash-input-azure_blob_storage.gemspec
+sudo -u logstash gem install logstash-input-azure_blob_storage-${VERSION}.gem
+sudo -u logstash /usr/share/logstash/bin/logstash-plugin install ${GEMPWD}/logstash-input-azure_blob_storage-${VERSION}.gem
 ```
 
 ## Minimal Configuration
@@ -76,9 +90,13 @@ The pipeline can be started in several ways.
    pipe.id = test
    pipe.path = /etc/logstash/conf.d/test.conf
    ```
+   and then started as a service
+   ```
+   service logstash start
+   ```
  - As managed pipeline from Kibana
 
-Logstash itself (so not specific to this plugin) has a feature where multiple instances can run on the same system. The default TCP port is 9600, but if it's already in use it will use 9601 (and up), this is probably not true anymore from v8. To update a config file on a running instance on the commandline you can add the argument --config.reload.automatic and if you modify the files that are in the pipeline.yml you can send a SIGHUP channel to reload the pipelines where the config was changed. 
+To update a config file on a running instance on the commandline you can add the argument --config.reload.automatic and if you modify the files that are in the pipeline.yml you can send a SIGHUP channel to reload the pipelines where the config was changed. 
 [https://www.elastic.co/guide/en/logstash/current/reloading-config.html](https://www.elastic.co/guide/en/logstash/current/reloading-config.html)
 
 ## Internal Working 
@@ -89,6 +107,10 @@ By default the root of the json message is named "message", you can modify the c
 Additional fields can be enabled with addfilename and addall, ecs_compatibility is not yet supported.
 
 The configurations and the rest of the code are in [https://github.com/janmg/logstash-input-azure_blob_storage/tree/master/lib/logstash/inputs](lib/logstash/inputs) [https://github.com/janmg/logstash-input-azure_blob_storage/blob/master/lib/logstash/inputs/azure_blob_storage.rb#L10](azure_blob_storage.rb)
+
+## Codecs
+The default codec is json, the plugin should also work with json_lines, line. Other codecs like gzip and csv may work, but this plugin doesn't have specific code to handle them. This plugin reads all the binary from the file and gives it to the codec to make into events. For the logtype nsgflowlogs the plugin will read all the blocks and chops it into one event per rule.
+https://www.elastic.co/guide/en/logstash/current/codec-plugins.html
 
 ## Enabling NSG Flowlogs
 1. Enable Network Watcher in your regions
