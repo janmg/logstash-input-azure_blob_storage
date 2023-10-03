@@ -41,6 +41,7 @@ sudo -u logstash /usr/share/logstash/bin/logstash-plugin update
 sudo -u logstash /usr/share/logstash/bin/logstash-plugin update logstash-input-azure_blob_storage
 sudo -u logstash /usr/share/logstash/bin/logstash-plugin remove logstash-input-azurestorage
 sudo -u logstash /usr/share/logstash/bin/logstash-plugin install logstash-input-azure_blob_storage
+```
 
 Alternatively you can use the commands from the build.sh script to build and install the gem locally. This you don't have to do, unless you want to modify the code in lib/logstash/inputs/azure_blob_storage.rb
 ```
