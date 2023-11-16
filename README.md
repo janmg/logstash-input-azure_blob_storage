@@ -1,3 +1,10 @@
+# WARNING !!!
+Because of on update of logstash or azure I can't seem to get this plugin to work.
+https://github.com/janmg/logstash-input-azure_blob_storage/issues/44
+It doesn't look like I'll be able to fix this.
+
+Going forward I'd like to use the experience to build an NSGFLOWLOG only tool that can fetch the log entries and feed them to a kafka queue, this way I cut the dependancy with logstash and with the logstash-input-kafka plugin you can still suck in the flow logs. I started a GOLANG client as a proof of concept. It will take some time before it's going to be useable.
+
 # Logstash 
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
