@@ -5,6 +5,8 @@ It doesn't look like I'll be able to fix this.
 
 Going forward I'd like to use the experience to build an NSGFLOWLOG only tool that can fetch the log entries and feed them to a kafka queue, this way I cut the dependancy with logstash and with the logstash-input-kafka plugin you can still suck in the flow logs. I started a GOLANG client as a proof of concept. It will take some time before it's going to be useable.
 
+Sofar I created a proof of concept named blob-to-kafka.go that can list blobs, list the blocks of a blob, read the blob, loop through the json and find the flowtumples and send them to kafka. I chose kafka because you can use an eventhub as kafka broker, or directly let logstash read from kafka. It's a proof of concept / work in progress. It's not yet using the file listing, the blob is only fully read and partials are not implemented and there is no tracking of which files got read. but atleast it looks hopeful I get some progress done.
+
 # Logstash 
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
