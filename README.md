@@ -1,27 +1,27 @@
 # WARNING !!!
 Because of on update of logstash or azure I can't seem to get this plugin to work.
 https://github.com/janmg/logstash-input-azure_blob_storage/issues/44
-It doesn't look like I'll be able to fix this.
+It doesn't look like I'll be able to fix this, even the quick start example is broken.
 
-Going forward I'd like to use the experience to build an NSGFLOWLOG only tool that can fetch the log entries and feed them to a kafka queue, this way I cut the dependancy with logstash and with the logstash-input-kafka plugin you can still suck in the flow logs. I started a GOLANG client as a proof of concept. It will take some time before it's going to be useable.
+Going forward I will rebuild an NSGFLOWLOG only tool in GOLANG, that can fetch the log entries and feed them to stdout, a log file, or a queue like kafka, this way I cut the JRUBY dependancies with logstash. With the logstash-input-kafka plugin you can still suck in the flow logs in logstash or use an Azure eventhub. The GOLANG program is a proof of concept. It will take some time before it's going to be useable.
 
-Sofar I created a proof of concept named blob-to-kafka.go that can list blobs, list the blocks of a blob, read the blob, loop through the json and find the flowtumples and send them to kafka. I chose kafka because you can use an eventhub as kafka broker, or directly let logstash read from kafka. It's a proof of concept / work in progress. It's not yet using the file listing, the blob is only fully read and partials are not implemented and there is no tracking of which files got read. but atleast it looks hopeful I get some progress done.
+blob-to-kafka.go can already list blobs, list the blocks of a blob, read the blob, loop through the json and find the flowtuples and send them to kafka. It's work in progress. It's not yet using the file listing, the blob is fully read and partial reads are not yet implemented and there is no tracking of which files got read. but at least it looks hopeful and I get some progress done.
+
+For problems or feature requests with this specific program, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will also be welcomed after discussion through an issue.
 
 # Logstash 
 
-This is a plugin for [Logstash](https://github.com/elastic/logstash). It is fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
-
-For problems or feature requests with this specific plugin, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will also be welcomed after discussion through an issue.
+This was a plugin for [Logstash](https://github.com/elastic/logstash). It was fully free and fully open source. The license is Apache 2.0, meaning you are pretty much free to use it however you want in whatever way. All logstash plugin documentation are placed under one [central location](http://www.elastic.co/guide/en/logstash/current/). Need generic logstash help? Try #logstash on freenode IRC or the https://discuss.elastic.co/c/logstash discussion forum.
 
 ## Purpose
-This plugin can read from Azure Storage Blobs, for instance JSON diagnostics logs for NSG flow logs or LINE based accesslogs from App Services. 
+This plugin was abled to read from Azure Storage Blobs, for instance JSON diagnostics logs for NSG flow logs or LINE based accesslogs from App Services. 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/)
 
 ## Alternatives
 This plugin was inspired by the Azure diagnostics tools, but should work better for bigger amounts of files. the configuration is not compatible, the configuration azureblob refers to the diagnostics tools plugin and this plugin uses azure_blob_storage
 https://github.com/Azure/azure-diagnostics-tools/tree/master/Logstash/logstash-input-azureblob
 
-There is a Filebeat plugin, that may work in the future
+There is a Filebeat plugin, that may work in the future (or not?)
 https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-input-azure-blob-storage.html
 
 ## Innerworking
