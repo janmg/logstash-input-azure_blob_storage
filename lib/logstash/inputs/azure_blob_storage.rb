@@ -331,6 +331,9 @@ public
                                 begin
                                     @codec.decode(chunk) do |event|
                                         counter += 1
+                                        if @addfilename
+                                            event.set('filename', name)
+                                        end
                                         queue << event
                                     end
                                     @processed += counter
