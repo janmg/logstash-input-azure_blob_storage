@@ -1,6 +1,8 @@
-## 0.12.10 (Not yet started)
-  - gzip support
-  - csv support
+## 0.12.11 (Not yet started)
+  - gzip and csv support?
+
+## 0.12.10
+  - addfilename for non json codecs
 
 ## 0.12.9
   - fixed the processing of non json and json_lines codecs
