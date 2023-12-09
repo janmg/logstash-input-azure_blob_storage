@@ -1,13 +1,17 @@
 # WARNING !!!
 Because of on update of logstash or azure I can't seem to get this plugin to work.
 https://github.com/janmg/logstash-input-azure_blob_storage/issues/44
-It doesn't look like I'll be able to fix this, even the quick start example is broken.
 
-Going forward I will rebuild an NSGFLOWLOG only tool in GOLANG, that can fetch the log entries and feed them to stdout, a log file, or a queue like kafka, this way I cut the JRUBY dependancies with logstash. With the logstash-input-kafka plugin you can still suck in the flow logs in logstash or use an Azure eventhub. The GOLANG program is a proof of concept. It will take some time before it's going to be useable.
+The highest version of logstash that works for me is Logstash 8.9.2
+https://www.elastic.co/downloads/past-releases/logstash-8-9-2
 
-blob-to-kafka.go can already list blobs, list the blocks of a blob, read the blob, loop through the json and find the flowtuples and send them to kafka. It's work in progress. It's not yet using the file listing, the blob is fully read and partial reads are not yet implemented and there is no tracking of which files got read. but at least it looks hopeful and I get some progress done.
+It doesn't look like I'll be able to fix this, even the [quick start example](https://github.com/Azure-Samples/storage-blobs-ruby-quickstart) is broken. Going forward I will rebuild an NSGFLOWLOG only tool in GOLANG, that can fetch the log entries and feed them to stdout, a log file, or a queue like kafka, this way I cut the JRUBY dependancies with logstash. With the logstash-input-kafka plugin you can still suck in the flow logs in logstash or use an Azure eventhub. The GOLANG program is a proof of concept. It will take some time before it's going to be useable.
 
-For problems or feature requests with this specific program, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). Pull requests will also be welcomed after discussion through an issue.
+[blob-to-queue.go](https://github.com/janmg/blob-to-queue) can already list blobs, list the blocks of a blob, read the blob, loop through the json and find the flowtuples and send them to kafka. It's work in progress. It's not yet using the file listing, a blob is read fully. Partial reads are not yet implemented and there is no tracking of which files got read.
+
+# Issues 
+
+For problems or feature requests with this specific program, raise a github issue [GITHUB/janmg/logstash-input-azure_blob_storage/](https://github.com/janmg/logstash-input-azure_blob_storage). I'm happy to explain, fix issues or implement small features.
 
 # Logstash 
 
