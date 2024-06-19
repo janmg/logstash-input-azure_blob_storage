@@ -30,7 +30,7 @@ class LogStash::Inputs::AzureBlobStorage < LogStash::Inputs::Base
     default :codec, "json"
 
     # logtype can be nsgflowlog, wadiis, appservice or raw. The default is raw, where files are read and added as one event. If the file grows, the next interval the file is read from the offset, so that the delta is sent as another event. In raw mode, further processing has to be done in the filter block. If the logtype is specified, this plugin will split and mutate and add individual events to the queue.
-    config :logtype, :validate => ['nsgflowlog','wadiis','appservice','raw'], :default => 'raw'
+    config :logtype, :validate => ['nsgflowlog','vnetflowlog','wadiis','appservice','raw'], :default => 'raw'
 
     # The storage account is accessed through Azure::Storage::Blob::BlobService, it needs either a sas_token, connection string or a storageaccount/access_key pair.
     # https://github.com/Azure/azure-storage-ruby/blob/master/blob/lib/azure/storage/blob/blob_service.rb#L42
@@ -154,7 +154,7 @@ public
         @tail = ''
         if @is_json
             # if codec=json sniff one files blocks A and Z to learn file_head and file_tail
-            if @logtype == 'nsgflowlog'
+            if @logtype == 'nsgflowlog' || @logtype == 'vnetflowlog'
                 @head = '{"records":['
                 @tail = ']}'
             end
@@ -274,6 +274,16 @@ public
                                 begin
                                     fingjson = JSON.parse(chunk)
                                     @processed += nsgflowlog(queue, fingjson, name)
+                                    @logger.debug("Processed #{res[:nsg]} #{@processed} events")
+                                rescue JSON::ParserError => e
+                                    @logger.error("parse error #{e.message} on #{res[:nsg]} offset: #{file[:offset]} length: #{file[:length]}")
+                                    if (@debug_until > @processed) then @logger.info("#{chunk}") end
+                                end
+                            elsif logtype == "vnetflowlog"
+                                res = resource(name)
+                                begin
+                                    fingjson = JSON.parse(chunk)
+                                    @processed += vnetflowlog(queue, fingjson, name)
                                     @logger.debug("Processed #{res[:nsg]} #{@processed} events")
                                 rescue JSON::ParserError => e
                                     @logger.error("parse error #{e.message} on #{res[:nsg]} offset: #{file[:offset]} length: #{file[:length]}")
@@ -588,6 +598,48 @@ private
             end
         rescue Exception => e
             @logger.error("NSG Flowlog problem for #{name} and error message #{e.message}")
+        end
+        return count
+    end
+
+    def vnetflowlog(queue, json, name)
+        count=0
+        begin
+            json["records"].each do |record|
+                extras = { :time => record["time"], :version => record["flowLogVersion"], :guid => record["flowLogGUID"], :mac => record["macAddress"], :category => record["category"], :flowid => record["flowLogResourceID"], :targetid => record["targetResourceID"], :operation => record["operationName"] }
+                record["flowRecords"]["flows"].each do |flows|
+                    acl = { :aclid => flows["aclID"]}
+                    flows["flowGroups"].each do |groups|
+                        rule = acl.merge({ :rule => groups["rule"]})
+                            groups["flowTuples"].each do |tups|
+                                tups = tup.split(',')
+                                ev = rule.merge({:unixtimestamp => tups[0], :src_ip => tups[1], :dst_ip => tups[2], :src_port => tups[3], :dst_port => tups[4], :protocol => tups[5], :direction => tups[6], :flowstate => tups[7], :encryption => tups[8], :src_pack => tups[9], :src_bytes => tups[10], :dst_pack => tups[11], :dst_bytes => tups[12]})
+                            end
+                            @logger.trace(ev.to_s)
+                            if @addfilename
+                                ev.merge!( {:filename => name } )
+                            end
+                            unless @environment.nil?
+                                ev.merge!( {:environment => environment } )
+                            end
+                            if @addall
+                                ev.merge!( extras )
+                            end
+
+                            # Add event to logstash queue
+                            event = LogStash::Event.new('message' => ev.to_json)
+                            #if @ecs_compatibility != "disabled"
+                            #    event = ecs(event)
+                            #end
+                            decorate(event)
+                            queue << event
+                            count+=1
+                        end
+                    end
+                end
+            end
+        rescue Exception => e
+            @logger.error("VNET Flowlog problem for #{name} and error message #{e.message}")
         end
         return count
     end
